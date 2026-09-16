@@ -1,6 +1,6 @@
 # Output contract and fix-agent handoff
 
-Use schema keys/status values in English. Narrative fields and Markdown use `config.output_language` (default `zh-CN`). Keep symbols, commands, paths, errors and identifiers unchanged. Paths are repository-relative in JSON plus the ledger's absolute root; report links should resolve for the user.
+Use schema keys/status values in English. Narrative fields and Markdown use the concrete `config.resolved_output_language` when `config.output_language=auto` (the default), or the explicitly configured language otherwise. Follow SKILL.md to resolve the user's preference; existing explicit-language ledgers remain valid. Keep symbols, commands, paths, errors and identifiers unchanged. Paths are repository-relative in JSON plus the ledger's absolute root; report links should resolve for the user.
 
 ## Artifacts
 
@@ -40,7 +40,7 @@ Every record has a stable ID. Preserve IDs across resume/revalidation; merge dup
 }
 ```
 
-This is a shape example, not a finding about the current project. Use actual verified line ranges. `locations` may be empty for an external object if evidence gives its stable identity; never invent code positions. `history` entries, when used, carry commit ID/path/conclusion. `depends_on` contains finding IDs that should be resolved first. Do not treat fix suggestions as already applied or execution steps as already run.
+This is a shape example using `zh-CN`, not a default-language instruction or a finding about the current project. Use actual verified line ranges. `locations` may be empty for an external object if evidence gives its stable identity; never invent code positions. `history` entries, when used, carry commit ID/path/conclusion. `depends_on` contains finding IDs that should be resolved first. Do not treat fix suggestions as already applied or execution steps as already run.
 
 - `status`: `candidate|confirmed|rejected`. A candidate needs a concrete validation next step and prevents audit closure until confirmed/rejected or converted to an explicit unreviewable coverage gap. Rejection needs `rejection_reason` and counterevidence; retaining its trail is useful.
 - `priority`: P0 active catastrophic/broad security or data loss; P1 substantial exploitable/correctness/integrity risk; P2 material bounded defect or evidenced maintainability debt; P3 minor actionable improvement. Priority comes from impact, not Grok strictness, file length or speculation. Optional architectural opportunities must say so and not imply a proven defect.
@@ -52,7 +52,7 @@ This is a shape example, not a finding about the current project. Use actual ver
 
 1. Scope, root(s), snapshot, output language, runtime scope, and result `complete`, `complete_with_limitations` or `in_progress`. Distinguish audit completion from quality approval; no unsupported "safe to ship" verdict.
 2. Findings ordered by impact. Explain trigger, impact, root cause, evidence and remedy, with direct locations. Give actionable structural feedback without cosmetic flooding.
-3. Coverage table per surface: discovery status, known units/checks, reviewed, unreviewable, pending/stale, not applicable, actual reviewed coverage. Unknown totals stay unknown. Keep static, file, runtime and cross-reference figures distinct.
+3. Coverage table per surface: discovery status, known units/checks, reviewed, unreviewable, pending/stale, not applicable, actual reviewed coverage. Unknown totals stay unknown. Keep static, file, runtime and cross-reference figures distinct. Break down application-defined and framework-generated API methods. Describe material traceability limitations if batch summaries cannot substantiate individual check outcomes; do not let a bookkeeping pass conceal them.
 4. Explicit limitations: each affected unit/check or missing inventory area, reason, impact, unblock action. Include source/build mismatch and omitted runtime scope. Do not hide these in a footnote while claiming 100%.
 5. Cross-reference conclusions, commands actually run and their outcomes; distinguish failed environment setup from application failure. Link evidence and describe targeted history conclusions when used.
 6. Fix-agent handoff: stable finding IDs, affected units/paths, dependencies, suggested fix scope, invariants to preserve, acceptance/regression checks and unresolved questions. Prioritize shared root causes before local symptoms. The fixing agent must recheck the snapshot and findings before changes; the handoff is not authorization to deploy or mutate external systems.

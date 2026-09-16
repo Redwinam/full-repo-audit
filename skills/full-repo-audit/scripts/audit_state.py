@@ -131,13 +131,25 @@ def unit(surface, label, sources):
             "checks": {name: {"status": "pending", "evidence": []} for name in CHECKS[surface]}}
 
 
+def resolve_output_language(policy, resolved_hint=None):
+    """The agent supplies conversational context; standalone CLI calls fall back to English."""
+    policy = policy.strip()
+    if not policy:
+        raise ValueError("output_language must not be empty")
+    resolved = policy if policy != "auto" else (resolved_hint if resolved_hint is not None else "en").strip()
+    if not resolved or resolved == "auto":
+        raise ValueError("resolved_output_language must be a concrete language tag")
+    return policy, resolved
+
+
 def initialize(args):
     root, state = args.root.resolve(), args.state_dir.resolve()
     if state.exists() and any(state.iterdir()):
         raise ValueError("State directory is not empty; resume it or choose a new audit ID")
+    policy, resolved = resolve_output_language(args.output_language, getattr(args, "resolved_output_language", None))
     snap = snapshot(root, state)
     ledger = {"schema_version": 1, "audit_id": state.name, "root": str(root),
-              "config": {"output_language": args.output_language, "mode": "report-only",
+              "config": {"output_language": policy, "resolved_output_language": resolved, "mode": "report-only",
                          "runtime_audit": args.runtime, "batch_target_units": 15},
               "extra_paths": [], "snapshot": snap,
               "surfaces": {s: {"status": "pending", "evidence": []} for s in CHECKS},
@@ -148,7 +160,7 @@ def initialize(args):
     atomic_json(state / "findings.json", {"schema_version": 1, "findings": []})
     (state / "resume.md").write_text(
         "# 审查续审位置\n\n状态：in_progress\n\n已建立文件清单；尚未进行语义 inventory 或审查。下一步：核对各审查面注册入口，补齐 units 与 discovery 证据。\n"
-        if args.output_language == "zh-CN" else
+        if resolved == "zh-CN" else
         "# Resume\n\nStatus: in_progress. File manifest seeded; semantic discovery and review have not started. Reconcile registries and add semantic units next.\n",
         encoding="utf-8")
     return {"state_dir": str(state), "files": len(snap["files"]), "status": "in_progress"}
@@ -181,6 +193,12 @@ def validate(ledger, findings, current):
     require(config.get("mode") == "report-only", "This audit contract requires report-only mode")
     require(config.get("runtime_audit") in {"off", "auto", "on"}, "Invalid runtime_audit")
     require(filled(config.get("output_language")), "output_language required")
+    if config.get("output_language") == "auto":
+        require(filled(config.get("resolved_output_language")) and config.get("resolved_output_language") != "auto",
+                "Auto language requires a concrete resolved_output_language")
+    elif "resolved_output_language" in config:
+        require(config["resolved_output_language"] == config.get("output_language"),
+                "Explicit output_language must match resolved_output_language")
     saved = ledger["snapshot"]
     drift = saved.get("fingerprint") != current["fingerprint"] or saved.get("head") != current["head"]
     changed_paths = sorted(p for p in set(saved["files"]) | set(current["files"])
@@ -197,6 +215,7 @@ def validate(ledger, findings, current):
     id_set = set(ids)
     by_surface = {s: [] for s in CHECKS}
     mapped_files = set()
+    semantic_evidence = {}
     counts = {s: {x: 0 for x in STATES} for s in CHECKS}
     for u in units:
         label, surface = u["id"], u.get("surface")
@@ -234,6 +253,10 @@ def validate(ledger, findings, current):
                 exclusions.append({"id": ref, "reason": check.get("reason"), "evidence": check.get("evidence")})
             else:
                 evidence(check, ref)
+                if surface != "file" and strings(check.get("evidence")):
+                    shared = semantic_evidence.setdefault(tuple(check["evidence"]), {"units": set(), "checks": []})
+                    shared["units"].add(label)
+                    shared["checks"].append(ref)
     require(mapped_files == set(saved["files"]), "Every manifest file needs exactly one classification unit")
     coverage = {}
     for surface in CHECKS:
@@ -312,6 +335,11 @@ def validate(ledger, findings, current):
             "quality_approval": "not_implied", "snapshot_changed": drift, "changed_paths": changed_paths,
             "source_snapshot": {"root": ledger["root"], "head": saved.get("head"), "fingerprint": saved.get("fingerprint")},
             "surfaces": coverage, "limitations": gaps, "exclusions": exclusions, "errors": errors,
+            "evidence_reuse": sorted(
+                [{"unit_count": len(group["units"]), "check_count": len(group["checks"]),
+                  "evidence": list(evidence_key), "sample_checks": group["checks"][:8]}
+                 for evidence_key, group in semantic_evidence.items() if len(group["units"]) > 1],
+                key=lambda group: (-group["check_count"], group["sample_checks"][0])),
             "finding_counts": {s: sum(f.get("status") == s for f in records)
                                for s in ("confirmed", "candidate", "rejected")}}
 
@@ -325,7 +353,10 @@ def main():
         if name != "check":
             command.add_argument("--root", type=Path, required=True)
         if name == "init":
-            command.add_argument("--output-language", default="zh-CN")
+            command.add_argument("--output-language", default="auto",
+                                 help="auto follows the agent's user-language decision; a language tag overrides it")
+            command.add_argument("--resolved-output-language",
+                                 help="Concrete language chosen by the agent for auto mode; standalone fallback: en")
             command.add_argument("--runtime", choices=("off", "auto", "on"), default="auto")
     args = parser.parse_args()
     state = args.state_dir.resolve()

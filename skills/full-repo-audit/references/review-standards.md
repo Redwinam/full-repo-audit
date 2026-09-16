@@ -38,3 +38,9 @@ These names match the helper's defaults. Add domain-specific checks; justify any
 ## Evidence bar
 
 Establish a concrete trigger or maintenance cost, impact, root cause and current evidence. Read surrounding flow and consumers. Look for counterevidence in guards, caller invariants, constraints, feature flags and tests. Use the smallest safe relevant verification when useful. Clear static causality can confirm a defect without running it; label execution status accurately. Store unresolved hypotheses as candidates, rejected ones with rejection evidence. Do not fill a finding quota.
+
+For reproductions, identify the precondition that makes the result meaningful and verify it directly. A browser wait must target the actual response, state or rendered text establishing that precondition; arbitrary delays, an unrelated selector or a swallowed timeout cannot prove a refresh completed. Preserve the failing observation but narrow the claimed verification when a precondition was not established. Keep current-data exposure distinct from supported future-input scenarios: code may prove a possible mismatch without proving existing records are already affected.
+
+Describe the fixture boundary: list replaced modules/services and framework adapters, explain what remains real, and separate directly asserted outcomes from static implications or untested variants. A confirmed finding may combine static and runtime proof, but its verification description must not silently promote an unexecuted variant into a reproduced result.
+
+Preserve fixture setup/reset steps and the source snapshot or relevant file hashes so another agent can replay the case from a known state. If a script imports from an active checkout, disclose that dependency and require snapshot reconciliation before replay; a saved script alone is not a self-contained reproducer.

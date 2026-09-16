@@ -32,7 +32,7 @@ def main():
         errors.append("UI prompt must explicitly invoke the Skill")
     if not 25 <= len(interface.get("short_description", "")) <= 64:
         errors.append("UI short_description must be 25–64 characters")
-    for path in [ROOT / "README.md", *SKILL.rglob("*.md")]:
+    for path in [*ROOT.glob("README*.md"), *SKILL.rglob("*.md")]:
         text = path.read_text(encoding="utf-8")
         for target in re.findall(r"\]\(([^)]+)\)", text):
             if "://" not in target and not target.startswith("#"):

@@ -46,6 +46,50 @@ class AuditStateTests(unittest.TestCase):
     def test_init_is_not_complete(self):
         self.assertEqual(self.check()['status'], 'in_progress')
 
+    def test_auto_language_has_standalone_fallback(self):
+        self.assertEqual(self.ledger['config']['output_language'], 'auto')
+        self.assertEqual(self.ledger['config']['resolved_output_language'], 'en')
+
+    def test_language_resolution_preserves_preferences(self):
+        resolve = m['resolve_output_language']
+        for language in ('zh-CN', 'en', 'ja', 'pt-BR', 'fr'):
+            with self.subTest(language=language):
+                self.assertEqual(resolve('auto', language), ('auto', language))
+                self.assertEqual(resolve(language, 'en'), (language, language))
+
+    def test_auto_language_cli_persists_resolution(self):
+        state = self.base / 'chinese-audit'
+        result = subprocess.run([sys.executable, str(SCRIPT), 'init', '--root', str(self.root),
+                                 '--state-dir', str(state), '--resolved-output-language', 'zh-CN'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = json.loads((state / 'ledger.json').read_text())['config']
+        self.assertEqual(config['output_language'], 'auto')
+        self.assertEqual(config['resolved_output_language'], 'zh-CN')
+        self.assertIn('审查续审位置', (state / 'resume.md').read_text())
+
+    def test_old_explicit_language_ledger_remains_valid(self):
+        self.completed()
+        self.ledger['config']['output_language'] = 'zh-CN'
+        self.ledger['config'].pop('resolved_output_language')
+        self.assertEqual(self.check()['status'], 'complete')
+
+    def test_missing_language_resolution_blocks_completion(self):
+        self.completed()
+        self.ledger['config'].pop('resolved_output_language')
+        self.assertEqual(self.check()['status'], 'in_progress')
+
+    def test_explicit_language_cannot_conflict_with_saved_resolution(self):
+        self.completed()
+        self.ledger['config']['output_language'] = 'zh-CN'
+        self.assertEqual(self.check()['status'], 'in_progress')
+
+    def test_language_resolution_rejects_empty_or_recursive_auto(self):
+        for policy, hint in [('', None), ('auto', ''), ('auto', 'auto')]:
+            with self.subTest(policy=policy, hint=hint):
+                with self.assertRaises(ValueError):
+                    m['resolve_output_language'](policy, hint)
+
     def test_empty_inventory_cannot_claim_completion(self):
         (self.root / 'app.py').unlink()
         self.ledger['snapshot'] = m['snapshot'](self.root, self.state)
@@ -62,6 +106,24 @@ class AuditStateTests(unittest.TestCase):
         self.assertEqual(result['status'], 'complete', result['errors'])
         self.assertEqual(result['surfaces']['module']['reviewed_coverage'], 100)
         self.assertEqual(result['quality_approval'], 'not_implied')
+
+    def test_shared_semantic_evidence_is_reported_without_false_failure(self):
+        self.completed()
+        another = m['unit']('module', 'another', ['app.py'])
+        self.review(another)
+        self.ledger['units'].append(another)
+        result = self.check()
+        self.assertEqual(result['status'], 'complete')
+        self.assertTrue(result['evidence_reuse'])
+        self.assertEqual(result['evidence_reuse'][0]['unit_count'], 3)
+        self.assertFalse(any(ref.startswith('file:') for group in result['evidence_reuse'] for ref in group['sample_checks']))
+
+    def test_distinct_anchored_evidence_has_no_reuse_diagnostic(self):
+        self.completed()
+        for u in self.ledger['units']:
+            for name, check in u['checks'].items():
+                check['evidence'] = [f'batches/B001.md#{u["id"]}-{name}; concrete observation']
+        self.assertEqual(self.check()['evidence_reuse'], [])
 
     def test_unreviewable_never_inflates_reviewed(self):
         self.completed()
