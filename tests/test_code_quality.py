@@ -144,6 +144,16 @@ class CodeQualityTests(unittest.TestCase):
         self.assertIn('A revised, scoped design', (self.state / 'code-quality.md').read_text())
         self.assertNotIn('Use the existing canonical owner', (self.state / 'code-quality.md').read_text())
 
+    def test_location_metadata_survives_human_report_rendering(self):
+        finding = self.finding()
+        finding['locations'][0].update(symbol='answer', context='Shared constant declaration')
+        self.assertEqual(self.cli_check().returncode, 0)
+        report = (self.state / 'code-quality.md').read_text()
+        self.assertIn('"end_line": 1', report)
+        self.assertIn('"symbol": "answer"', report)
+        self.assertIn('Shared constant declaration', report)
+        self.assertIn(str(self.root / 'app.py') + ':1', report)
+
     def test_unknown_classification_remains_visible_in_draft(self):
         self.finding()['kind'] = 'unclassified'
         self.assertEqual(self.cli_check().returncode, 2)

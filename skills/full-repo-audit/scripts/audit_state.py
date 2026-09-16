@@ -527,8 +527,9 @@ def render_quality(catalog, labels):
             for field, value in finding.items():
                 if field not in {'id', 'title', 'priority'}:
                     if field == 'locations' and value:
-                        rendered = "\n".join(
+                        rendered = "\n\n".join(
                             f"- [{loc['path']}:{loc['start_line']}](<{Path(catalog['source_snapshot']['root']) / loc['path']}:{loc['start_line']}>)"
+                            + "\n\n" + text_value({key: item for key, item in loc.items() if key not in {'path', 'start_line'}})
                             for loc in value)
                     else:
                         rendered = text_value(value)

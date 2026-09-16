@@ -102,6 +102,8 @@ For the current quality contract, `check` writes:
 
 Fix information in `ledger.json` / `findings.json`, then rerun `check`; do not edit generated quality reports or maintain a competing catalog. `report.md` provides synthesis and links the full quality report. The final chat may be brief but must name the counts of defects, debt and opportunities and link the detailed report; do not make the user search batch logs to find recommendations.
 
+For multi-root audits, generate these reports per state directory. The combined report links each root's quality catalog, identifies records by root/audit plus finding ID, and presents shared root causes once with all affected roots linked. Do not flatten ambiguous relative paths or count the same shared issue as independent discoveries. Combined completion requires all included roots and shared-boundary work to close.
+
 Open candidates, unclassified items, missing dimensions, unrepresented maintainability units, inconsistent references and missing debt/opportunity tradeoffs prevent completion. Known unfixed items do not: review closure is distinct from remediation. Unreviewable quality dimensions permit only `complete_with_limitations` when all other required work is closed.
 
 ### Language of generated headings
