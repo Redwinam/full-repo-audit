@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+dist/
+.output/
+.nuxt/
+target/
+*.log
+.env
