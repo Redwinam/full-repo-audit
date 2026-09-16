@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import sys
@@ -30,22 +31,89 @@ CHECKS = {
     "cross_reference": ["end_to_end", "consistency"],
 }
 STATES = {"pending", "in_progress", "stale", "reviewed", "unreviewable", "not_applicable"}
+QUALITY_DIMENSIONS = ("structure", "ownership", "duplication", "state_flow",
+                      "type_contracts", "failure_orchestration", "clarity_dead_code")
+FINDING_KINDS = ("defect", "maintainability_debt", "improvement_opportunity")
+QUALITY_LABELS = {
+    "en": {
+        "title": "Code quality review", "defect": "Confirmed defects",
+        "maintainability_debt": "Maintainability debt",
+        "improvement_opportunity": "Optional structural improvements (non-blocking)",
+        "matrix": "Review dimensions", "pending": "Unresolved candidates / classification",
+        "rejected": "Rejected candidates", "limitations": "Limitations",
+        "empty": "No items recorded in this section; consult scope and limitations.",
+        "notice": "Review coverage is not a quality score. All confirmed records are included without a top-N limit. Narrative fields come from findings.json; schema field names stay in English."
+    },
+    "zh-CN": {
+        "title": "代码质量逐项报告", "defect": "确认缺陷",
+        "maintainability_debt": "可维护性债务",
+        "improvement_opportunity": "可选结构优化（不阻断发布）",
+        "matrix": "质量维度审查", "pending": "未决候选／待分类问题",
+        "rejected": "已排除候选", "limitations": "审查限制",
+        "empty": "本节没有记录条目；请结合审查范围与限制阅读。",
+        "notice": "审查覆盖率不是质量分数。完整列出所有确认条目，不设数量上限。解释内容来自 findings.json；固定协议字段保留英文。"
+    }
+}
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def atomic_json(path, value):
+def atomic_text(path, value):
     fd, name = tempfile.mkstemp(prefix=".audit-", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
+            stream.write(value)
         os.replace(name, path)
     finally:
         if os.path.exists(name):
             os.unlink(name)
+
+
+def atomic_json(path, value):
+    atomic_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+
+def new_quality_review():
+    return {dimension: {"status": "pending", "unit_ids": [], "finding_ids": [], "evidence": []}
+            for dimension in QUALITY_DIMENSIONS}
+
+
+def upgrade_quality(state):
+    """Preserve prior work; classification and quality conclusions require a reviewer."""
+    ledger = json.loads((state / "ledger.json").read_text(encoding="utf-8"))
+    findings = json.loads((state / "findings.json").read_text(encoding="utf-8"))
+    if ledger.get("quality_contract_version") == 1:
+        return {"status": "unchanged", "quality_contract_version": 1}
+    if ledger.get("schema_version") != 1 or findings.get("schema_version") != 1:
+        raise ValueError("Only schema_version 1 audit state can be upgraded")
+    if ledger.get("quality_contract_version") is not None:
+        raise ValueError("Unsupported quality contract; do not downgrade it")
+    # Backup before any mutation. Keep the original bytes, IDs, source snapshot and evidence.
+    backup = Path(tempfile.mkdtemp(prefix="pre-quality-upgrade-", dir=state))
+    names = [name for name in ("ledger.json", "findings.json", "coverage.json", "resume.md")
+             if (state / name).is_file()]
+    for name in names:
+        shutil.copyfile(state / name, backup / name)
+    ledger["quality_contract_version"] = 1
+    ledger["quality_review"] = new_quality_review()
+    for finding in findings["findings"]:
+        finding.setdefault("kind", "unclassified")
+        finding.setdefault("quality_dimensions", [])
+    try:
+        atomic_json(state / "findings.json", findings)
+        atomic_json(state / "ledger.json", ledger)
+        atomic_json(state / "coverage.json", {"status": "in_progress", "quality_contract_version": 1,
+                    "errors": ["Quality dimensions and existing finding classification need review after upgrade"]})
+    except OSError:
+        for name in names:
+            atomic_text(state / name, (backup / name).read_text(encoding="utf-8"))
+        if "coverage.json" not in names and (state / "coverage.json").exists():
+            (state / "coverage.json").unlink()
+        raise
+    return {"status": "in_progress", "quality_contract_version": 1, "backup": str(backup),
+            "next_action": "Classify existing findings and review quality dimensions; retain valid source reviews"}
 
 
 def git(root, *args):
@@ -152,6 +220,7 @@ def initialize(args):
               "config": {"output_language": policy, "resolved_output_language": resolved, "mode": "report-only",
                          "runtime_audit": args.runtime, "batch_target_units": 15},
               "extra_paths": [], "snapshot": snap,
+              "quality_contract_version": 1, "quality_review": new_quality_review(),
               "surfaces": {s: {"status": "pending", "evidence": []} for s in CHECKS},
               "units": [unit("file", p, [p]) for p in snap["files"]]}
     state.mkdir(parents=True, exist_ok=True)
@@ -330,11 +399,74 @@ def validate(ledger, findings, current):
             require(filled(f.get("rejection_reason")), f"{ref}: rejection_reason required")
     for u in units:
         require(all(x in finding_ids for x in u.get("finding_ids", [])), f"{u['id']}: unknown finding_ids")
+    quality = {"status": "legacy_not_assessed", "contract_version": None}
+    contract = ledger.get("quality_contract_version")
+    require(contract is None or (type(contract) is int and contract == 1), "Unsupported quality_contract_version")
+    if ledger.get("quality_contract_version") == 1:
+        before_errors, before_gaps = len(errors), len(gaps)
+        dimensions = ledger.get("quality_review", {})
+        require(set(dimensions) == set(QUALITY_DIMENSIONS), "All seven quality dimensions must be present")
+        record_map = {f["id"]: f for f in records}
+        represented = set()
+        for dimension in QUALITY_DIMENSIONS:
+            review = dimensions.get(dimension, {})
+            ref, status = f"quality:{dimension}", review.get("status")
+            require(status in STATES, f"{ref}: invalid status")
+            scoped_units = review.get("unit_ids", [])
+            linked = review.get("finding_ids")
+            require(isinstance(scoped_units, list) and all(x in id_set for x in scoped_units), f"{ref}: invalid unit_ids")
+            require(isinstance(linked, list), f"{ref}: explicit finding_ids array required (empty when none)")
+            for finding_id in linked or []:
+                finding = record_map.get(finding_id, {})
+                require(finding.get("status") == "confirmed" and dimension in finding.get("quality_dimensions", []),
+                        f"{ref}: finding {finding_id} must be confirmed and mapped back to this dimension")
+            if status in {"pending", "in_progress", "stale"}:
+                errors.append(f"{ref}: unfinished ({status})")
+            elif status == "unreviewable":
+                limitation(review, ref)
+                represented.update(scoped_units)
+            elif status == "not_applicable":
+                evidence(review, ref)
+                require(filled(review.get("reason")) and not linked, f"{ref}: absence reason and no findings required")
+            elif status == "reviewed":
+                evidence(review, ref)
+                require(bool(scoped_units), f"{ref}: reviewed dimension needs explicit scope")
+                represented.update(scoped_units)
+        required_units = {u['id'] for u in units if 'maintainability' in u.get('checks', {})
+                          and u['checks']['maintainability'].get('status') != 'not_applicable'}
+        require(required_units <= represented, "Quality dimensions omit units with applicable maintainability checks: "
+                + ", ".join(sorted(required_units - represented)))
+        for finding in records:
+            ref, kind = finding["id"], finding.get("kind")
+            require(finding.get('status') != 'candidate', f"{ref}: unresolved catalog candidate")
+            require(kind in FINDING_KINDS, f"{ref}: kind must classify defect, debt or opportunity")
+            dims = finding.get("quality_dimensions")
+            require(isinstance(dims, list) and all(d in QUALITY_DIMENSIONS for d in dims), f"{ref}: invalid quality_dimensions")
+            if kind in {"maintainability_debt", "improvement_opportunity"}:
+                require(bool(dims), f"{ref}: debt/opportunity needs a quality dimension")
+                require(finding.get('priority') in {'P2', 'P3'}, f"{ref}: a P0/P1 behavioral risk belongs in defect")
+                require(filled(finding.get("tradeoffs")), f"{ref}: tradeoffs required")
+                require(strings(finding.get("behavior_to_preserve")), f"{ref}: behavior_to_preserve required")
+            if finding.get("status") == "confirmed":
+                for dimension in dims or []:
+                    review = dimensions.get(dimension, {})
+                    require(ref in review.get("finding_ids", []), f"{ref}: missing from quality:{dimension} finding_ids")
+                    require(set(finding.get("unit_ids", [])) <= set(review.get("unit_ids", [])),
+                            f"{ref}: affected units missing from quality:{dimension} scope")
+        quality = {"contract_version": 1,
+                   "status": "in_progress" if len(errors) > before_errors else
+                   ("complete_with_limitations" if len(gaps) > before_gaps else "complete"),
+                   "dimension_counts": {s: sum(d.get("status") == s for d in dimensions.values()) for s in sorted(STATES)},
+                   "finding_counts": {kind: sum(f.get("kind") == kind and f.get("status") == "confirmed" for f in records)
+                                      for kind in FINDING_KINDS}}
     return {"schema_version": 1, "generated_at": now(), "audit_id": ledger.get("audit_id"),
             "status": "in_progress" if errors else ("complete_with_limitations" if gaps else "complete"),
             "quality_approval": "not_implied", "snapshot_changed": drift, "changed_paths": changed_paths,
             "source_snapshot": {"root": ledger["root"], "head": saved.get("head"), "fingerprint": saved.get("fingerprint")},
             "surfaces": coverage, "limitations": gaps, "exclusions": exclusions, "errors": errors,
+            "quality_review": quality,
+            "warnings": (["Legacy contract: this result does not certify the expanded code-quality review; run upgrade before resuming"]
+                         if quality['status'] == 'legacy_not_assessed' else []),
             "evidence_reuse": sorted(
                 [{"unit_count": len(group["units"]), "check_count": len(group["checks"]),
                   "evidence": list(evidence_key), "sample_checks": group["checks"][:8]}
@@ -344,13 +476,77 @@ def validate(ledger, findings, current):
                                for s in ("confirmed", "candidate", "rejected")}}
 
 
+def quality_labels(state, config):
+    language = config.get("resolved_output_language", config.get("output_language", "en"))
+    built_in = "en" if language.startswith("en") else "zh-CN" if language in {"zh", "zh-CN", "zh-Hans"} else None
+    if built_in:
+        return QUALITY_LABELS[built_in], None
+    path = state / "quality-labels.json"
+    if path.is_file():
+        custom = json.loads(path.read_text(encoding="utf-8"))
+        if (custom.get("language") == language and isinstance(custom.get("labels"), dict)
+                and set(custom["labels"]) == set(QUALITY_LABELS["en"])
+                and all(isinstance(v, str) and v.strip() for v in custom["labels"].values())):
+            return custom["labels"], None
+    return QUALITY_LABELS["en"], (f"Localized report labels required for {language}: provide quality-labels.json; "
+                                  "the generated English headings are a draft, not a final localized report")
+
+
+def quality_catalog(ledger, findings, result):
+    records = findings["findings"]
+    return {"schema_version": 1, "audit_id": ledger['audit_id'], "status": result['status'],
+            "source_snapshot": result['source_snapshot'], "quality_approval": "not_implied",
+            "language": ledger['config'].get('resolved_output_language', ledger['config']['output_language']),
+            "dimensions": ledger.get('quality_review', {}), "limitations": result['limitations'],
+            "groups": {kind: sorted([f for f in records if f.get('status') == 'confirmed' and f.get('kind') == kind],
+                                     key=lambda f: (f['priority'], f['id'])) for kind in FINDING_KINDS},
+            "pending": [f for f in records if f.get('status') == 'candidate' or f.get('kind') not in FINDING_KINDS],
+            "rejected": [f for f in records if f.get('status') == 'rejected' and f.get('kind') in FINDING_KINDS]}
+
+
+def render_quality(catalog, labels):
+    def text_value(value):
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            return "\n".join("- " + item.replace("\n", "\n  ") for item in value) if value else "[]"
+        return "```json\n" + json.dumps(value, ensure_ascii=False, indent=2) + "\n```"
+
+    lines = [f"# {labels['title']}", "", labels['notice'], "",
+             f"audit_id: `{catalog['audit_id']}` · status: `{catalog['status']}`", "",
+             f"root: `{catalog['source_snapshot']['root']}` · HEAD: `{catalog['source_snapshot']['head']}`", "",
+             f"snapshot: `{catalog['source_snapshot']['fingerprint']}`", ""]
+    # Every field is retained, including extra domain-specific evidence and tradeoffs.
+    for key in (*FINDING_KINDS, 'pending', 'rejected'):
+        entries = catalog['groups'][key] if key in FINDING_KINDS else catalog[key]
+        lines.extend([f"## {labels[key]}", ""])
+        if not entries:
+            lines.extend([labels['empty'], ""])
+        for finding in entries:
+            lines.extend([f"### {finding['id']} · {finding.get('priority', '')} · {finding.get('title', '')}", ""])
+            for field, value in finding.items():
+                if field not in {'id', 'title', 'priority'}:
+                    if field == 'locations' and value:
+                        rendered = "\n".join(
+                            f"- [{loc['path']}:{loc['start_line']}](<{Path(catalog['source_snapshot']['root']) / loc['path']}:{loc['start_line']}>)"
+                            for loc in value)
+                    else:
+                        rendered = text_value(value)
+                    lines.extend([f"**{field}**", "", rendered, ""])
+    lines.extend([f"## {labels['matrix']}", ""])
+    for dimension, record in catalog['dimensions'].items():
+        lines.extend([f"### {dimension}", "", text_value(record), ""])
+    lines.extend([f"## {labels['limitations']}", "", text_value(catalog['limitations']), ""])
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("init", "snapshot", "check"):
+    for name in ("init", "snapshot", "check", "upgrade"):
         command = sub.add_parser(name)
         command.add_argument("--state-dir", type=Path, required=True)
-        if name != "check":
+        if name in {"init", "snapshot"}:
             command.add_argument("--root", type=Path, required=True)
         if name == "init":
             command.add_argument("--output-language", default="auto",
@@ -360,9 +556,12 @@ def main():
             command.add_argument("--runtime", choices=("off", "auto", "on"), default="auto")
     args = parser.parse_args()
     state = args.state_dir.resolve()
+    ledger = {}
     try:
         if args.command == "init":
             result = initialize(args)
+        elif args.command == "upgrade":
+            result = upgrade_quality(state)
         else:
             ledger_path = state / "ledger.json"
             ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {}
@@ -373,6 +572,14 @@ def main():
             else:
                 findings = json.loads((state / "findings.json").read_text(encoding="utf-8"))
                 result = validate(ledger, findings, current)
+                if ledger.get('quality_contract_version') == 1:
+                    labels, localization_error = quality_labels(state, ledger['config'])
+                    if localization_error:
+                        result['errors'].append(localization_error)
+                        result['status'] = 'in_progress'
+                    catalog = quality_catalog(ledger, findings, result)
+                    atomic_json(state / 'code-quality.json', catalog)
+                    atomic_text(state / 'code-quality.md', render_quality(catalog, labels))
                 atomic_json(state / "coverage.json", result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 2 if args.command == "check" and result["status"] == "in_progress" else 0
@@ -380,6 +587,11 @@ def main():
         failure = {"status": "in_progress", "errors": [f"Invalid state or execution failure: {error}"]}
         if args.command == "check" and state.is_dir():
             atomic_json(state / "coverage.json", failure)
+            if ((isinstance(ledger, dict) and ledger.get('quality_contract_version') == 1)
+                    or (state / 'code-quality.json').exists() or (state / 'code-quality.md').exists()):
+                atomic_json(state / 'code-quality.json', failure)
+                atomic_text(state / 'code-quality.md', '# Code-quality report unavailable\n\nstatus: `in_progress`\n\n'
+                            + failure['errors'][0] + '\n')
         print(json.dumps(failure, ensure_ascii=False), file=sys.stderr)
         return 1
 

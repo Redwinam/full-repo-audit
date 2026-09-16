@@ -1,6 +1,6 @@
 ---
 name: full-repo-audit
-description: Coverage-driven whole-repository audit with per-page, route, API, database, permission and job review, persistent checkpoints and cross-reference checks. Use for full project audits or resuming them, not routine diff-only review or implementation.
+description: Coverage-driven whole-repository audit with persistent checkpoints, cross-reference checks and detailed defect, maintainability-debt and structural-improvement catalogs. Use for full project audits or resuming them, not routine diff-only review or implementation.
 ---
 
 # Full Repository Audit
@@ -27,6 +27,8 @@ Record resolved settings in `ledger.json.config`:
 
 Read [coverage-protocol.md](references/coverage-protocol.md) before creating/resuming state. `scripts/audit_state.py` seeds a file manifest and validates bookkeeping using Python 3 standard library only. It does not discover semantic objects or perform a review.
 
+Read [code-quality.md](references/code-quality.md) for the required quality track and report. New audits include `quality_contract_version: 1`. Before resuming an older audit without that marker, use the helper's `upgrade` command; retain valid source evidence and IDs while reviewing new quality requirements. A legacy coverage result alone does not satisfy this version's completion gate.
+
 1. Identify roots, packages/services, frameworks, entrypoints, scripts and working-tree state. Record HEAD and content fingerprint, including relevant untracked files; preserve local changes. Multiple repositories need one state per root plus shared integration/cross-reference work; aggregate completion requires all roots and shared boundaries to close.
 2. Reconcile filenames with independent registries: route/page declarations, API registrations/OpenAPI, effective schema plus migrations, grants/policies, queue/cron/worker registrations and deployment configuration. Inspect hidden config. Explain ignored/generated/vendor paths. Missing submodules, unavailable services and unresolved dynamic registration remain visible gaps.
 3. Inventory every applicable surface: `file`, `page`, `route`, `api`, `database`, `permission`, `job`, `component`, `module`, `integration`, `test`, `delivery`. A page and route are distinct units. Distinguish HTTP methods, roles/tenants, schema-qualified DB objects, policies/grants and worker/schedule identities. Label framework-generated methods (such as automatic HEAD/OPTIONS) separately from application-defined handlers, record their inherited implementation, and report both counts.
@@ -44,6 +46,7 @@ Read [review-standards.md](references/review-standards.md). Read [output-contrac
 - Read implementation, consumers, contracts and relevant tests. Complete each required check with specific evidence and negative cases. Search hits, merely opening files, passing tests and absence of findings are insufficient.
 - For each reviewed check, record a concrete observation tied to its unit and check, inline or at an exact section/case anchor in batch evidence. Shared proof may be reused if the shared invariant and each consumer's applicability are clear. Do not bulk-close unrelated checks with one generic "read implementation and callers" statement, or merely paraphrase boilerplate to make evidence look different.
 - Separate confirmed findings, unresolved candidates and rejected candidates. Deduplicate root causes and preserve stable IDs. A fully investigated defect counts as reviewed even while unfixed.
+- Classify each finding as `defect`, `maintainability_debt` or `improvement_opportunity`. Capture every worthwhile evidenced observation in the canonical catalog, including non-blocking refactors; do not hide debt in batch notes to keep the finding list short. Link design causes of existing defects to quality dimensions instead of duplicating IDs. Follow code-quality.md for costs, concrete alternatives, tradeoffs and behavior-preserving acceptance checks.
 - Persist ledger/findings atomically after each batch; update `resume.md` with snapshot, completed/current batches, pending IDs, questions and exact next action. Do not rely on conversation memory.
 - On interruption leave `in_progress`. On resume load persisted state, reconcile snapshot changes, invalidate affected reviews and continue pending work. Do not restart unaffected units or claim completion when a session ends.
 
@@ -68,6 +71,8 @@ After individual batches, create `cross_reference` units for applicable end-to-e
 
 Check missing links as well as present links. Reconcile common root causes across batches. Newly discovered work reopens inventory and affected units; rerun affected cross-reference checks afterwards. Name any unverifiable boundary and its affected flows.
 
+Also close the seven quality dimensions and reconcile all batch observations with findings. Every relevant maintainability unit must be in scope; every recorded debt/opportunity must be classified and explained. Positive outcomes and justified exclusions remain visible; no finding quota or automatic penalty for file size is permitted.
+
 ## 5. Completion gate and handoff
 
 Run `scripts/audit_state.py check --state-dir <state-dir>` to validate state and emit `coverage.json`. Inspect `evidence_reuse` groups for blanket assertions without unit/check-specific support; reuse itself is not an error when anchored shared proof covers the checks. Independently inspect evidence quality, inventory completeness and snapshot reconciliation; bookkeeping cannot prove those judgments.
@@ -76,5 +81,6 @@ Run `scripts/audit_state.py check --state-dir <state-dir>` to validate state and
 - `complete_with_limitations`: every remaining gap is explicitly `unreviewable`, with scope, reason, impact and unblock action; every reviewable check is reviewed and cross-reference work is performed to the available extent. Name limitations in the headline and retain actual coverage below 100%. Unknown denominators stay `unknown`.
 - Otherwise `in_progress`. Empty inventories, pending work, time budgets and optional-tool absence never justify unconditional completion. Narrower user scope is a scoped audit, not a full-repository completion.
 - Completion closes review work; it does not approve project quality. Confirmed defects and maintainability debt remain visible and need not be fixed to finish the review.
+- The quality matrix and canonical catalog must also close under the current contract. The helper generates complete `code-quality.md` and `code-quality.json` views containing all confirmed items in three sections, plus candidates, dimensions and limitations. Missing classification/quality scope or unresolved candidates prevent completion; optional improvements do not become release blockers.
 
-Deliver `report.md`, `findings.json`, `coverage.json`, `ledger.json`, `resume.md` and batch evidence using the output contract. Include coverage per surface, exact limitations/runtime scope, findings by impact, commands actually run and independent fix-agent handoff. Verify audit actions did not change source/working-tree state; never revert another actor's changes.
+Deliver `report.md`, `code-quality.md`, `code-quality.json`, `findings.json`, `coverage.json`, `ledger.json`, `resume.md` and batch evidence using the output contract. The chat summary may be concise, but link the full quality report and state counts of defects, debt and opportunities. Include coverage per surface, exact limitations/runtime scope, commands actually run and independent fix-agent handoff. Verify audit actions did not change source/working-tree state; never revert another actor's changes.

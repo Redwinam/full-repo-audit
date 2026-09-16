@@ -2,7 +2,7 @@
 
 ## Adaptation of the user-supplied Grok Skill
 
-The supplied `Strict Code Quality Review` targets current-branch changes. Retain ambitious structural simplification, rigorous checking, canonical ownership and a small number of high-conviction findings. Extend these to all current code without inventing a historical regression. Claimed Cursor lineage has not been independently verified.
+The supplied `Strict Code Quality Review` targets current-branch changes. Retain ambitious structural simplification, rigorous checking, canonical ownership and high-conviction findings. Extend these to all current code without inventing a historical regression. Do not impose a small-number quota: every identified, worthwhile, evidenced defect, maintenance cost or concrete improvement belongs in the full catalog. Claimed Cursor lineage has not been independently verified.
 
 - **Structural simplification / code judo:** seek designs that remove concepts, branches, modes or layers while preserving behavior. Require a concrete simpler alternative, current maintenance cost, compatibility constraints and verification plan. Moving complexity is not removing it; speculative redesign is not a blocker.
 - **File size / cohesion:** 1,000 lines is an inspection trigger, not an automatic defect. Evaluate responsibilities, coupling, ownership and navigation; name coherent extraction boundaries and expected benefit. Record generated/declarative exceptions. Do not claim an existing file recently crossed the threshold without history evidence.
@@ -13,6 +13,8 @@ The supplied `Strict Code Quality Review` targets current-branch changes. Retain
 - **Orchestration / atomicity:** examine avoidable sequential work, partial writes, retries and compensation. Suggest concurrency only when operations are independent and ordering/rate limits allow it. Do not propose a transaction across incompatible systems.
 
 The source's presumptive blockers become evidence-based quality concerns here. Be strict about substantial design costs without treating taste, line counts or imagined simplifications as release blockers. Security/correctness/data-loss impact outranks maintainability; within maintainability prioritize structural simplification, branching, boundaries/types, decomposition, then legibility. Avoid cosmetic noise.
+
+Follow [code-quality.md](code-quality.md) to distinguish defects, debt and non-blocking improvements and close the seven quality dimensions. Prioritization determines order, not omission. A concrete simplification can deserve an improvement record even when there is no current bug; a speculative or purely stylistic preference does not.
 
 ## Required checks by surface
 

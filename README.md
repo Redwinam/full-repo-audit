@@ -8,6 +8,8 @@ Review the current complete project, including old and unchanged code. Build an 
 
 The default is **report-only**. Instructions and machine-readable keys stay in English; reports follow the user's language automatically. Code symbols, paths, commands and error messages remain unchanged.
 
+Code quality has a dedicated, complete report: confirmed defects, maintainability debt, and optional structural improvements. A concise chat summary never replaces the full item-by-item catalog.
+
 ## Install
 
 Requires Python 3.10+. The installer and audit helper use only the standard library. Playwright, external model APIs and deployment credentials are not required. Installation and automated checks currently cover macOS and Linux.
@@ -58,6 +60,8 @@ The resolved language is saved in `config.resolved_output_language`. Set `output
 
 The standalone Python helper cannot read a conversation. Codex passes its decision through `--resolved-output-language`; a manual CLI call without that hint falls back to `en`. Initial resume scaffolds are English or Simplified Chinese; the agent localizes them to the selected language before delivery.
 
+Generated quality-report headings support English and Simplified Chinese directly. For other languages the agent supplies `quality-labels.json` as described in the quality protocol; users do not need to translate it or configure an external service. Finding prose and fixed schema keys retain the same language rules.
+
 ## Coverage and completion
 
 Inventory spans files, pages, routes, APIs, databases, permissions, jobs, components, modules, integrations, tests, delivery configuration, optional runtime checks and final cross-reference flows. Framework-generated methods such as HEAD/OPTIONS are distinguished from application-defined handlers.
@@ -72,6 +76,22 @@ Unreviewable checks never count as reviewed. Unknown denominators stay `unknown`
 
 Every check needs a concrete observation or a precise section/case reference. `evidence_reuse` highlights identical evidence shared across units for inspection; legitimate shared proof is allowed and reuse alone does not fail the gate. The helper validates bookkeeping, not the truth of reasoning or completeness of semantic discovery.
 
+## Dedicated code-quality review
+
+The reviewer checks seven dimensions: structure, ownership, duplication, state/control flow, type contracts, failure/concurrency orchestration, and clarity/dead code. Applicable maintainability units must be represented in these scopes. This is a review matrix, not a numeric quality score.
+
+All identified, evidence-backed, actionable items go into one canonical `findings.json` catalog:
+
+| Kind | What the detailed report records |
+|---|---|
+| `defect` | Trigger, behavioral impact, root cause, evidence, remedy and acceptance checks |
+| `maintainability_debt` | Concrete ongoing maintenance cost, simpler design, tradeoffs and behavior to preserve |
+| `improvement_opportunity` | A worthwhile, supported structural improvement, explicitly non-blocking, with scope and verification |
+
+There is no finding quota or top-N cap. Optional improvements are not silently dropped because bugs rank higher. Cosmetic preferences and speculative redesigns are not manufactured into issues. A structural cause attached to a defect keeps that defect's ID rather than becoming a duplicate debt record.
+
+`check` generates `code-quality.md` and `code-quality.json` from the canonical data, retaining every confirmed item and all fields. Missing classification, unreviewed dimensions, missing scope, inconsistent references or unresolved candidates block completion. Unfixed findings do not prevent the review from closing. Fix the source ledger/catalog and regenerate; do not maintain a second report-specific list.
+
 ## Artifacts and handoff
 
 State is stored outside the repository by default, under `$CODEX_HOME/audits/<repo-name>-<root-path-hash>/<audit-id>/` (`~/.codex` when unset), or at an explicit destination.
@@ -80,6 +100,7 @@ State is stored outside the repository by default, under `$CODEX_HOME/audits/<re
 |---|---|
 | `ledger.json` | Inventory, source snapshot, dependencies, checks and evidence |
 | `findings.json` | Stable IDs, impact, root cause, locations, verification and acceptance checks |
+| `code-quality.md` / `code-quality.json` | Complete generated catalog in three sections, quality dimensions, candidates and limitations |
 | `coverage.json` | Per-surface counts, gaps, evidence-reuse diagnostics and completion result |
 | `report.md` | User-facing review and independent fix-agent handoff |
 | `resume.md` | Exact continuation point and next actions |
@@ -97,6 +118,7 @@ These standards were informed by a supplied Grok `Strict Code Quality Review` te
 - [Review standards](skills/full-repo-audit/references/review-standards.md)
 - [Coverage and resume protocol](skills/full-repo-audit/references/coverage-protocol.md)
 - [Output and handoff contract](skills/full-repo-audit/references/output-contract.md)
+- [Code-quality catalog and completion protocol](skills/full-repo-audit/references/code-quality.md)
 - [Optional runtime audit](skills/full-repo-audit/references/runtime-audit.md)
 
 ## Helper CLI
@@ -112,6 +134,14 @@ python3 skills/full-repo-audit/scripts/audit_state.py check \
 ```
 
 `check` exits with `0` when the bookkeeping gate passes (possibly with limitations), `2` for incomplete/invalid review state, and `1` for input or execution failure. Read the JSON status and limitations, not only the exit code.
+
+To continue an older audit without `quality_contract_version`, first run:
+
+```bash
+python3 skills/full-repo-audit/scripts/audit_state.py upgrade --state-dir /path/to/audit-state
+```
+
+The upgrade backs up existing state, preserves source reviews and finding IDs, and adds pending quality dimensions and unclassified existing items for the reviewer. It never guesses debt/defect classifications. Historical legacy checks remain readable but explicitly report `legacy_not_assessed` for the expanded quality track; they do not certify it.
 
 ## Development
 

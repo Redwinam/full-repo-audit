@@ -1,14 +1,12 @@
 import copy
 import json
 from pathlib import Path
-import runpy
 import subprocess
 import sys
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'skills' / 'full-repo-audit' / 'scripts' / 'audit_state.py'
-m = runpy.run_path(str(SCRIPT))
+from tests.support import SCRIPT, m, complete_fixture
 
 
 class AuditStateTests(unittest.TestCase):
@@ -31,14 +29,7 @@ class AuditStateTests(unittest.TestCase):
             c.update(status='reviewed', evidence=['app.py:1; inspected concrete behavior in test fixture'])
 
     def completed(self):
-        for r in self.ledger['surfaces'].values():
-            r.update(status='not_applicable', reason='Fixture has no such registrations', evidence=['Full fixture inventory: app.py only'])
-        for name in ('file', 'module', 'cross_reference'):
-            self.ledger['surfaces'][name].update(status='complete')
-        for surface in ('module', 'cross_reference'):
-            self.ledger['units'].append(m['unit'](surface, 'app', ['app.py']))
-        for u in self.ledger['units']:
-            self.review(u)
+        complete_fixture(self.ledger)
 
     def check(self):
         return m['validate'](self.ledger, self.findings, m['snapshot'](self.root, self.state))
@@ -112,6 +103,7 @@ class AuditStateTests(unittest.TestCase):
         another = m['unit']('module', 'another', ['app.py'])
         self.review(another)
         self.ledger['units'].append(another)
+        self.ledger['quality_review']['structure']['unit_ids'].append(another['id'])
         result = self.check()
         self.assertEqual(result['status'], 'complete')
         self.assertTrue(result['evidence_reuse'])
@@ -226,6 +218,7 @@ class AuditStateTests(unittest.TestCase):
         self.completed()
         f = {k: 'Concrete fixture evidence' for k in ('title','trigger','impact','root_cause','counterevidence','recommendation')}
         f.update(id='F-001', status='confirmed', priority='P2', category='maintainability', confidence='high',
+                 kind='defect', quality_dimensions=[],
                  unit_ids=['module:app'], evidence=['app.py:1'], locations=[{'path':'app.py','start_line':1,'end_line':1}],
                  verification={'method':'static','result':'confirmed','details':'Inspected call chain'},
                  acceptance_checks=['Verify behavior'],fix_scope=['app.py'],depends_on=[])

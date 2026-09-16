@@ -8,6 +8,8 @@
 
 默认只报告、不修改代码。机器指令和固定术语使用英文；报告、finding 解释与建议默认自动跟随用户语言，可通过 `output_language` 显式指定。代码符号、路径、命令与错误文本保持原文。
 
+代码质量有独立完整报告：确认缺陷、可维护性债务、可选结构优化逐条呈现。聊天摘要可以简短，不能取代完整问题清单。
+
 ## 安装
 
 需要 Python 3.10+。安装工具和审查账本工具只使用标准库；不要求 Playwright、外部模型 API 或部署凭据。当前安装与自动测试支持 macOS 和 Linux。
@@ -73,12 +75,15 @@ python3 tools/install_skill.py --link --replace
 
 辅助脚本无法读取会话，Codex 会传入 `--resolved-output-language`；独立手动运行且不传该选项时回退 `en`。
 
+生成的代码质量报告内置英文和简体中文标题。其他语言由 agent 按质量协议提供 `quality-labels.json`，无需用户翻译或配置外部服务；正文和固定协议字段继续遵循同一语言策略。
+
 默认状态目录位于仓库外的 `$CODEX_HOME/audits/<repo-name>-<root-path-hash>/<audit-id>/`，未设置 `CODEX_HOME` 时使用 `~/.codex`。也可以明确指定产物目录。
 
 | 产物 | 用途 |
 |---|---|
 | `ledger.json` | inventory、文件快照、对象依赖、逐项状态和证据 |
 | `findings.json` | 稳定 finding ID、影响、根因、位置、验证与修复验收要求 |
+| `code-quality.md` / `code-quality.json` | 自动生成的完整三类问题清单、质量维度、候选和限制 |
 | `coverage.json` | 各审查面的真实覆盖率、未知范围、限制与完成门槛结果 |
 | `report.md` | 面向用户的结论和修复交接 |
 | `resume.md` | 精确续审位置、未完成项和下一步 |
@@ -96,6 +101,22 @@ python3 tools/install_skill.py --link --replace
 
 辅助脚本只负责文件清单、指纹和账本校验。语义 inventory、证据质量、跨模块推理仍由审查 agent 完成，不能靠填满状态字段证明审查质量。每项检查需要具体观察或精确的批次小节/案例引用；`evidence_reuse` 会提示跨对象重复使用的相同证据，供人工核对。共享实现可以复用证明，提示本身不会机械判错。框架自动生成的 HEAD/OPTIONS 与显式业务接口分别统计。
 
+## 独立代码质量报告
+
+固定检查七个维度：结构简化、职责归属、重复实现、状态与控制流、类型契约、失败与并发编排、清晰度与死代码。所有适用的可维护性单元必须进入维度范围；这是审查清单，不是质量评分。
+
+所有已识别、有证据且值得处理的条目，都进入唯一的 `findings.json`：
+
+| 分类 | 完整报告中的内容 |
+|---|---|
+| `defect` 确认缺陷 | 触发条件、实际影响、根因、证据、修复建议与验收 |
+| `maintainability_debt` 可维护性债务 | 当前维护代价、具体简化方案、取舍和需保留的行为 |
+| `improvement_opportunity` 可选结构优化 | 有依据的优化收益、明确不阻断发布、范围及验证方式 |
+
+不设发现数量配额或报告条数上限；安全/功能问题优先，不意味着其余有价值的建议被省略。风格偏好和空泛重构不凑数，已有缺陷的结构性根因仍沿用同一 ID，不重复制造“债务”条目。
+
+`check` 从规范数据生成 `code-quality.md` 与 `code-quality.json`，保留每一条确认问题和所有字段。分类缺失、维度未审、范围遗漏、引用不一致或候选未决都会阻止结案；已知问题尚未修复不阻止审查完成。应修改账本/规范清单后重新生成，不另维护一份报告专用问题列表。
+
 ## 审查标准
 
 保留严格代码质量审查中的结构简化（code judo）、减少特殊分支、类型边界、规范 helper 复用、职责归属、合理并发和原子性检查。千行文件是重点检查信号，结合内聚性和职责判断；不机械按行数判错。严重安全、正确性、数据完整性问题按实际影响优先。
@@ -108,6 +129,7 @@ python3 tools/install_skill.py --link --replace
 - [审查标准](skills/full-repo-audit/references/review-standards.md)
 - [覆盖率与续审协议](skills/full-repo-audit/references/coverage-protocol.md)
 - [输出与修复交接](skills/full-repo-audit/references/output-contract.md)
+- [代码质量清单与完成协议](skills/full-repo-audit/references/code-quality.md)
 - [可选运行时审查](skills/full-repo-audit/references/runtime-audit.md)
 
 ## 手动检查账本
@@ -123,6 +145,14 @@ python3 skills/full-repo-audit/scripts/audit_state.py check \
 ```
 
 `check` 的退出码：`0` 表示账本完成门槛通过（可能包含明确限制），`2` 表示未完成或校验不通过，`1` 表示输入/执行失败。必须同时读取 JSON 的 `status` 和限制清单。
+
+继续没有 `quality_contract_version` 的旧审查时，先运行：
+
+```bash
+python3 skills/full-repo-audit/scripts/audit_state.py upgrade --state-dir /path/to/audit-state
+```
+
+升级先备份原状态，保留源码审查证据和问题 ID，新增待审的质量维度，并把未分类旧条目标为待分类，交由 agent 复核。工具不会猜测分类。旧账本仍可读取，但其质量状态明确显示 `legacy_not_assessed`，不能当作新版代码质量审查通过。
 
 ## 开发与验证
 
