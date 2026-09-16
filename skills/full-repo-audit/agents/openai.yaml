@@ -1,0 +1,4 @@
+interface:
+  display_name: "全仓库覆盖率审查"
+  short_description: "按页面、接口与权限逐项审查全仓库，记录覆盖率并支持中断续审"
+  default_prompt: "使用 $full-repo-audit 对当前项目进行全仓库审查，默认只报告不修改代码，输出简体中文 findings 和 coverage 报告。"

@@ -1,0 +1,2 @@
+# Only repository validation uses PyYAML; installed Skill helpers use the standard library.
+PyYAML==6.0.3

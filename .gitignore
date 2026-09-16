@@ -6,3 +6,14 @@ dist/
 target/
 *.log
 .env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+work/
+outputs/
+.audit/
