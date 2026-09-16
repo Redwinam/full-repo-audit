@@ -40,6 +40,14 @@ class InstallSkillTests(unittest.TestCase):
             install(self.source, self.home, link=True)
         self.assertFalse(self.target.is_symlink())
 
+    def test_link_can_be_replaced_with_independent_copy(self):
+        install(self.source, self.home, link=True)
+        result = install(self.source, self.home, replace=True)
+        self.assertFalse(self.target.is_symlink())
+        self.assertTrue(Path(result['backup']).is_symlink())
+        (self.source / 'SKILL.md').write_text('later source')
+        self.assertEqual((self.target / 'SKILL.md').read_text(), 'new skill')
+
     def test_replacement_preserves_old_files_outside_discovery(self):
         install(self.source, self.home)
         (self.target / 'local.md').write_text('preserve this')

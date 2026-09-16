@@ -23,7 +23,8 @@ def install(source, codex_home, *, link=False, replace=False):
         raise ValueError("Source must contain SKILL.md")
     if target.is_symlink() and target.resolve() == source and link:
         return {"status": "unchanged", "target": str(target), "mode": "link"}
-    if target.resolve() == source or target in source.parents or source in target.parents:
+    if ((target.resolve() == source and not target.is_symlink())
+            or target in source.parents or source in target.parents):
         raise ValueError("Source and destination must not overlap")
     exists = os.path.lexists(target)
     if exists and not replace:
