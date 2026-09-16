@@ -97,7 +97,7 @@ During the final cross-reference pass, reconcile batch observations, per-unit co
 For the current quality contract, `check` writes:
 
 - `code-quality.json`: all confirmed records grouped by kind, the quality matrix, pending/rejected candidates, limitations and source snapshot.
-- `code-quality.md`: a complete readable rendering of the same data, with every finding field, source links and all three sections, including empty sections. There is no top-N truncation.
+- `code-quality.md`: a complete readable rendering of the same data, with every finding field, full location metadata, source links and all three sections, including empty sections. Its opening shows category counts, snapshot and runtime scope; its closing records semantic exclusions and the count of file exclusions (full list in coverage.json). There is no top-N truncation of findings.
 - `coverage.json`: both ordinary coverage and `quality_review` closure status/counts. These are review-completion statistics, not quality scores.
 
 Fix information in `ledger.json` / `findings.json`, then rerun `check`; do not edit generated quality reports or maintain a competing catalog. `report.md` provides synthesis and links the full quality report. The final chat may be brief but must name the counts of defects, debt and opportunities and link the detailed report; do not make the user search batch logs to find recommendations.

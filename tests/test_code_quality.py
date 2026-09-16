@@ -247,6 +247,18 @@ class CodeQualityTests(unittest.TestCase):
         self.assertIn('重复维护同一状态机', report)
         self.assertIn('可选结构优化（不阻断发布）', report)
 
+    def test_standalone_report_exposes_scope_and_all_three_counts(self):
+        self.ledger['config']['runtime_audit'] = 'off'
+        self.finding()
+        self.assertEqual(self.cli_check().returncode, 0)
+        report = (self.state / 'code-quality.md').read_text()
+        catalog = json.loads((self.state / 'code-quality.json').read_text())
+        self.assertIn('runtime_audit: `off`', report)
+        self.assertIn('| Maintainability debt | 1 |', report)
+        self.assertIn('| Optional structural improvements (non-blocking) | 0 |', report)
+        self.assertTrue(any(x['id'] == 'discovery:runtime' for x in catalog['exclusions']))
+        self.assertIn('discovery:runtime', report)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -497,7 +497,9 @@ def quality_catalog(ledger, findings, result):
     return {"schema_version": 1, "audit_id": ledger['audit_id'], "status": result['status'],
             "source_snapshot": result['source_snapshot'], "quality_approval": "not_implied",
             "language": ledger['config'].get('resolved_output_language', ledger['config']['output_language']),
+            "review_scope": {key: ledger['config'][key] for key in ('mode', 'runtime_audit')},
             "dimensions": ledger.get('quality_review', {}), "limitations": result['limitations'],
+            "exclusions": result['exclusions'],
             "groups": {kind: sorted([f for f in records if f.get('status') == 'confirmed' and f.get('kind') == kind],
                                      key=lambda f: (f['priority'], f['id'])) for kind in FINDING_KINDS},
             "pending": [f for f in records if f.get('status') == 'candidate' or f.get('kind') not in FINDING_KINDS],
@@ -515,7 +517,11 @@ def render_quality(catalog, labels):
     lines = [f"# {labels['title']}", "", labels['notice'], "",
              f"audit_id: `{catalog['audit_id']}` · status: `{catalog['status']}`", "",
              f"root: `{catalog['source_snapshot']['root']}` · HEAD: `{catalog['source_snapshot']['head']}`", "",
+             f"mode: `{catalog['review_scope']['mode']}` · runtime_audit: `{catalog['review_scope']['runtime_audit']}`", "",
              f"snapshot: `{catalog['source_snapshot']['fingerprint']}`", ""]
+    lines.extend(['| kind | count |', '|---|---:|'])
+    lines.extend(f"| {labels[kind]} | {len(catalog['groups'][kind])} |" for kind in FINDING_KINDS)
+    lines.append('')
     # Every field is retained, including extra domain-specific evidence and tradeoffs.
     for key in (*FINDING_KINDS, 'pending', 'rejected'):
         entries = catalog['groups'][key] if key in FINDING_KINDS else catalog[key]
@@ -537,7 +543,11 @@ def render_quality(catalog, labels):
     lines.extend([f"## {labels['matrix']}", ""])
     for dimension, record in catalog['dimensions'].items():
         lines.extend([f"### {dimension}", "", text_value(record), ""])
-    lines.extend([f"## {labels['limitations']}", "", text_value(catalog['limitations']), ""])
+    scope_notes = {'unreviewable': catalog['limitations'],
+                   'exclusions': [entry for entry in catalog['exclusions'] if not entry['id'].startswith('file:')],
+                   'file_exclusions_count': sum(entry['id'].startswith('file:') for entry in catalog['exclusions']),
+                   'full_exclusions': 'coverage.json'}
+    lines.extend([f"## {labels['limitations']}", "", text_value(scope_notes), ""])
     return "\n".join(lines)
 
 

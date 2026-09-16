@@ -6,6 +6,8 @@ Use available project tests, browser tools or an existing Playwright setup. Play
 - `auto`: assess existing scripts, URLs, tools and test accounts. Use a suitable authorized environment when available. Declare selected routes/roles/viewports and all omitted runtime scope. With no environment, record why runtime was not performed; static work continues.
 - `on`: enumerate the requested runtime matrix. Missing setup/accounts/tools becomes `unreviewable`, with reason, impact and unblock action. Ask only for genuinely missing prerequisites while continuing independent static work; do not silently downgrade to off.
 
+`off` disables the dedicated environment/browser audit, not all code execution. Existing local unit tests and isolated deterministic reproductions may support the source review when within authorization and without modifying the audited project or external systems. Label that evidence `test`/`mixed`, not source-only `static`, and do not count it as runtime-environment coverage. An explicit user instruction to execute no code takes precedence.
+
 Record environment URL/build identity, relation to the audited snapshot, role/tenant, viewport, fixtures and timestamps. A deployed build of unknown provenance cannot certify the local checkout. Never persist cookies, tokens, passwords or personal records in traces/reports.
 
 1. Observe each selected route/flow directly and through navigation, including primary actions and relevant loading/empty/error/forbidden/expired-session cases.
