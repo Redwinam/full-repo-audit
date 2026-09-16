@@ -5,7 +5,7 @@
 Resolve `<skill-dir>` from the loaded skill path, not the current directory. Use absolute, shell-quoted paths. The helper requires only Python 3; audit execution itself can use equivalent JSON bookkeeping if Python is unavailable, with the same gate applied manually and this limitation recorded.
 
 ```text
-python3 <skill-dir>/scripts/audit_state.py init --root <repo-root> --state-dir <state-dir>
+python3 <skill-dir>/scripts/audit_state.py init --root <repo-root> --state-dir <state-dir> --resolved-output-language <resolved-language>
 python3 <skill-dir>/scripts/audit_state.py snapshot --root <repo-root> --state-dir <state-dir>
 python3 <skill-dir>/scripts/audit_state.py check --state-dir <state-dir>
 ```

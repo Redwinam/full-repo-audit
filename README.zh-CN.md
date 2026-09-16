@@ -116,7 +116,8 @@ python3 tools/install_skill.py --link --replace
 
 ```bash
 python3 skills/full-repo-audit/scripts/audit_state.py init \
-  --root /path/to/project --state-dir /path/to/audit-state
+  --root /path/to/project --state-dir /path/to/audit-state \
+  --resolved-output-language zh-CN
 python3 skills/full-repo-audit/scripts/audit_state.py check \
   --state-dir /path/to/audit-state
 ```
