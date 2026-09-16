@@ -46,6 +46,16 @@ class AuditStateTests(unittest.TestCase):
     def test_init_is_not_complete(self):
         self.assertEqual(self.check()['status'], 'in_progress')
 
+    def test_empty_inventory_cannot_claim_completion(self):
+        (self.root / 'app.py').unlink()
+        self.ledger['snapshot'] = m['snapshot'](self.root, self.state)
+        self.ledger['units'] = []
+        for surface in self.ledger['surfaces'].values():
+            surface.update(status='not_applicable', reason='Empty directory', evidence=['No files or registrations present'])
+        result = self.check()
+        self.assertEqual(result['status'], 'in_progress')
+        self.assertTrue(any('no units' in error for error in result['errors']))
+
     def test_full_coverage(self):
         self.completed()
         result = self.check()

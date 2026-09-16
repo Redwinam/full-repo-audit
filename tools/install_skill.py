@@ -42,7 +42,14 @@ def install(source, codex_home, *, link=False, replace=False):
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             backup = codex_home / "skill-backups" / f"{NAME}-{stamp}-{uuid.uuid4().hex[:8]}"
             backup.parent.mkdir(parents=True, exist_ok=True)
-            target.rename(backup)
+            if target.is_symlink():
+                old_link = Path(os.readlink(target))
+                # Relative links must keep their meaning after moving out of skills/.
+                backup.symlink_to(old_link if old_link.is_absolute() else target.parent / old_link,
+                                  target_is_directory=True)
+                target.unlink()
+            else:
+                target.rename(backup)
         try:
             os.replace(payload, target)
         except OSError:

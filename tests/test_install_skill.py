@@ -66,6 +66,17 @@ class InstallSkillTests(unittest.TestCase):
         self.assertTrue(Path(result['backup']).is_symlink())
         self.assertEqual((self.target / 'SKILL.md').read_text(), 'new skill')
 
+    def test_relative_link_backup_preserves_original_destination(self):
+        old_source = self.target.parent / 'local-source'
+        old_source.mkdir(parents=True)
+        (old_source / 'SKILL.md').write_text('old skill')
+        self.target.symlink_to('local-source')
+        result = install(self.source, self.home, replace=True)
+        backup = Path(result['backup'])
+        self.assertEqual(backup.resolve(), old_source)
+        self.assertEqual((backup / 'SKILL.md').read_text(), 'old skill')
+        self.assertEqual((self.target / 'SKILL.md').read_text(), 'new skill')
+
     def test_source_must_be_skill(self):
         (self.source / 'SKILL.md').unlink()
         with self.assertRaises(ValueError):

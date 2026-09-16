@@ -191,6 +191,7 @@ def validate(ledger, findings, current):
     require(set(surfaces) == set(CHECKS), "All fixed discovery surfaces must be present exactly once")
     units = ledger.get("units", [])
     require(isinstance(units, list), "units must be an array")
+    require(bool(units), "Inventory has no units; full-repository completion cannot be established")
     ids = [u["id"] for u in units]
     require(all(filled(x) for x in ids) and len(ids) == len(set(ids)), "Unit IDs must be nonempty and unique")
     id_set = set(ids)
