@@ -5,16 +5,38 @@
 Resolve `<skill-dir>` from the loaded skill path, not the current directory. Use absolute, shell-quoted paths. The helper requires only Python 3; audit execution itself can use equivalent JSON bookkeeping if Python is unavailable, with the same gate applied manually and this limitation recorded.
 
 ```text
-python3 <skill-dir>/scripts/audit_state.py init --root <repo-root> --state-dir <state-dir> --resolved-output-language <resolved-language>
+python3 <skill-dir>/scripts/audit_state.py init --root <repo-root> --state-dir <state-dir> --resolved-output-language <lang> [--mode audit-then-fix] [--runtime off|auto|on]
+python3 <skill-dir>/scripts/audit_state.py apply --state-dir <state-dir> --file <ops.jsonl>   # or JSON Lines on stdin
 python3 <skill-dir>/scripts/audit_state.py snapshot --root <repo-root> --state-dir <state-dir>
 python3 <skill-dir>/scripts/audit_state.py check --state-dir <state-dir>
+python3 <skill-dir>/scripts/audit_state.py close-audit --state-dir <state-dir>   # audit-then-fix only
 ```
 
-`init` creates `ledger.json`, `findings.json`, `resume.md` and `batches/` without overwriting existing state. `snapshot` emits current metadata to stdout without changing the ledger. `check` rechecks the snapshot, validates state and writes `coverage.json`; exit 0 means the completion gate passes (including explicit limitations), 2 means unfinished/invalid state, 1 means execution/input failure. Always read the JSON status, not only the exit code. `--runtime on|off|auto`, `--output-language auto|<language-tag>` and `--resolved-output-language <language-tag>` are init options.
+`init` creates `ledger.json`, `findings.json`, `resume.md` and `batches/` without overwriting existing state. `snapshot` prints current metadata without changing the ledger. `check` rechecks the snapshot, validates state and writes `coverage.json` plus the quality reports; exit 0 means the gate passes (possibly with limitations), 2 unfinished or invalid state, 1 an execution/input failure. Read the JSON status, errors and warnings, not only the exit code.
 
-New audits also set `quality_contract_version: 1` and seed seven pending entries in `quality_review`. `check` writes `code-quality.json` and `code-quality.md` before publishing its coverage result. Both the surface checks and quality catalog/matrix must close. Read [code-quality.md](code-quality.md) for finding kinds, quality dimensions, localized labels and the `upgrade` command for older ledgers. A legacy gate is explicitly labeled `legacy_not_assessed` for this expanded track.
+### Recording with `apply`
 
-`output_language` defaults to `auto`. The agent resolves user/conversation preferences using SKILL.md and passes the concrete tag; the standalone helper cannot inspect a conversation and falls back to `en` when no resolution is supplied. An explicit `--output-language` always wins over the resolution hint. Persist `resolved_output_language` to keep resumed reports consistent. Existing explicit-language ledgers without that new field remain valid. The helper's initial resume scaffold is available in English and Simplified Chinese; localize it to the resolved language before user-facing delivery rather than treating the scaffold language as a preference.
+`apply` reads one JSON object per line and applies them all or none. Write a batch's operations to a file in the state directory and apply it once, instead of editing JSON by hand or writing helper scripts. `evidence` accepts a string or an array.
+
+| `op` | Fields | Effect |
+|---|---|---|
+| `unit` | `surface`, `label`, `sources`, optional `id`, `depends_on`, `notes`, `checks` (extra check names) | Add a unit with the surface's default checks, or update an existing one |
+| `review` | `unit` or `units`, `checks` (`"all"` default, or names), `status` (`reviewed` default), `evidence`, `batch_id`; `reason`/`impact`/`unblock` when needed | Set check results |
+| `classify` | `pattern` (glob over file paths; `*` crosses `/`) or `paths`, `evidence`, optional `status`/`reason` | Classify matching file units in bulk |
+| `surface` | `surface`, `status` (`complete` default), `evidence`, `reason`/`impact`/`unblock` | Record discovery reconciliation |
+| `finding` | any finding fields, `id` required | Create or merge a finding |
+| `quality` | `dimension`, `status`, `evidence`, `add_unit_ids`, `reason`/`impact`/`unblock` | Record a quality dimension |
+| `resolve` | `finding`, `status` (`fixed`/`deferred`/`wont_fix`), `details`, `verification` | Record a fix-phase outcome |
+
+After every `apply`, each dimension's `finding_ids` is recomputed from the confirmed findings' `quality_dimensions`, and their units are added to its scope, so the two directions never need hand maintenance. An unknown unit, check or finding aborts the whole batch.
+
+New audits also set `quality_contract_version: 1` and seed seven pending entries in `quality_review`. Read [code-quality.md](code-quality.md) for finding kinds, quality dimensions, localized labels and the `upgrade` command for older ledgers.
+
+### Modes
+
+`report-only` never records resolutions. In `audit-then-fix`, `close-audit` runs the gate; while the audit is `in_progress` it changes nothing. Once the gate passes it stores `audit_closed` in the ledger and a frozen `coverage-audit.json`. From then on `check` treats source changes as the fix phase: it no longer demands snapshot reconciliation, lists `changed_paths`, and reports `remediation` counts. Its exit code stays 2 until every confirmed finding has a resolution. Resolutions recorded before `close-audit` are errors.
+
+The helper cannot read a conversation, so `--resolved-output-language` carries the agent's language decision; without it the standalone default is `en`. Persist it so resumed reports stay consistent.
 
 Use one writer; write UTF-8 JSON to a temporary sibling and atomically replace the destination. Keep audit artifacts outside the repository. State directories within the repository are omitted from snapshots, but should not overlap application paths. Never put state at the repository root or a parent of it.
 
@@ -78,7 +100,7 @@ accounted_coverage = (reviewed + explicitly unreviewable) / applicable
 
 `unreviewable` stays in the applicable denominator and never enters the reviewed numerator. `pending`, `in_progress` and `stale` block completion. Surface absence yields `not_applicable`, not a fabricated 100%. Unknown discovery yields `reviewed_coverage=unknown`; report a separate known-check fraction without hiding unknown scope. Do not average surfaces into a misleading overall score. Report units and checks as well as percentages; one check cannot conceal unfinished sibling checks. Separate file accountability, semantic static coverage, runtime scope/coverage and cross-reference coverage.
 
-Known-check closure at 100% with explicit gaps only permits `complete_with_limitations`. Empty/missing required checks, incomplete discovery, stale snapshot and unresolved candidates force `in_progress`. The checker also reports identical semantic evidence reused across units in `evidence_reuse` (file classifications excluded). This is an advisory traceability diagnostic, not a quality score or automatic failure: check the referenced observations instead of inventing different wording. The reviewer must reject weak evidence, unjustified exclusions and an incomplete semantic inventory even if the script passes.
+Known-check closure at 100% with explicit gaps only permits `complete_with_limitations`. Runtime gaps count toward that headline only under `runtime_audit=on`; otherwise `check` reports them under `runtime`, and `limitation_groups` collapses gaps that share one reason so reports state each constraint once. Empty/missing required checks, incomplete discovery, stale snapshot and unresolved candidates force `in_progress`. Evidence citing `batches/<file>.md` must name a file that exists, and an `#anchor` must occur in that file; evidence consisting only of bare batch filenames is rejected. The checker also reports identical semantic evidence across units in `evidence_reuse` and identical finding counterevidence in `warnings`. These are advisory: inspect the observations rather than rewording them. The reviewer must reject weak evidence, unjustified exclusions and an incomplete semantic inventory even if the script passes.
 
 ## Resume and change invalidation
 

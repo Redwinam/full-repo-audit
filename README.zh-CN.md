@@ -6,7 +6,7 @@
 
 以覆盖率驱动的全仓库审查 Skill：从当前完整项目建立 inventory，逐页面、路由、API、数据库对象、权限策略和后台任务审查，分批记录证据，支持中断续审，最后做跨模块核对。
 
-默认只报告、不修改代码。机器指令和固定术语使用英文；报告、finding 解释与建议默认自动跟随用户语言，可通过 `output_language` 显式指定。代码符号、路径、命令与错误文本保持原文。
+默认只报告、不修改代码。如果要求修复发现的问题，则使用 **audit-then-fix** 模式：先完成并关闭审查，再逐条修复，并记录每条修复的验证方式。机器指令和固定术语使用英文；报告、finding 解释与建议默认自动跟随用户语言，可通过 `output_language` 显式指定。代码符号、路径、命令与错误文本保持原文。
 
 代码质量有独立完整报告：确认缺陷、可维护性债务、可选结构优化逐条呈现。聊天摘要可以简短，不能取代完整问题清单。
 
@@ -14,7 +14,7 @@
 
 需要 Python 3.10+。安装工具和审查账本工具只使用标准库；不要求 Playwright、外部模型 API 或部署凭据。当前安装与自动测试支持 macOS 和 Linux。
 
-两个平台共用同一个 `skills/full-repo-audit/`，审查规则只维护一份。平台差异只在外围：`agents/openai.yaml` 供 Codex 界面使用，`.claude-plugin/` 让本仓库可以作为 Claude Code 插件安装。
+两个平台共用同一个 `skills/full-repo-audit/`，审查规则只维护一份。平台差异只在外围：`.codex-plugin/` 加 `.agents/plugins/`、`.claude-plugin/` 分别让本仓库能在 Codex 和 Claude Code 中作为插件安装，`agents/openai.yaml` 供 Codex 界面使用。
 
 ### Claude Code
 
@@ -34,6 +34,22 @@ python3 tools/install_skill.py --agent claude
 `--replace`、`--link` 的用法与下文 Codex 相同，加上 `--agent claude` 即可。
 
 ### Codex
+
+从 GitHub 以插件方式安装：
+
+```bash
+codex plugin marketplace add Redwinam/full-repo-audit
+codex plugin add full-repo-audit@full-repo-audit
+```
+
+以后升级：先刷新快照，再安装一次：
+
+```bash
+codex plugin marketplace upgrade full-repo-audit
+codex plugin add full-repo-audit@full-repo-audit
+```
+
+也可以用安装工具复制：
 
 ```bash
 git clone https://github.com/Redwinam/full-repo-audit.git
@@ -78,6 +94,14 @@ python3 tools/install_skill.py --link --replace
 ```text
 使用 $full-repo-audit 审查当前完整项目，runtime_audit=on。无法执行的检查逐项列为限制，同时继续完成其他静态审查。
 ```
+
+审查后修复：
+
+```text
+使用 $full-repo-audit 审查当前完整项目，审查完成后修复所有发现的问题。
+```
+
+agent 会先关闭审查再改代码，每条问题记录为 `fixed`（附实际运行的验证）、`deferred` 或 `wont_fix`。`runtime_audit=auto` 时，缺少运行环境只在运行时部分单独报告，不影响总体结论；只有 `runtime_audit=on` 才计入。
 
 续审：
 
@@ -163,6 +187,8 @@ python3 tools/install_skill.py --link --replace
 python3 skills/full-repo-audit/scripts/audit_state.py init \
   --root /path/to/project --state-dir /path/to/audit-state \
   --resolved-output-language zh-CN
+python3 skills/full-repo-audit/scripts/audit_state.py apply \
+  --state-dir /path/to/audit-state --file ops.jsonl
 python3 skills/full-repo-audit/scripts/audit_state.py check \
   --state-dir /path/to/audit-state
 ```

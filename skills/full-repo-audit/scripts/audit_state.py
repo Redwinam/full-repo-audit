@@ -2,9 +2,11 @@
 """Seed audit state and verify coverage bookkeeping. Never review or edit source."""
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -31,6 +33,10 @@ CHECKS = {
     "cross_reference": ["end_to_end", "consistency"],
 }
 STATES = {"pending", "in_progress", "stale", "reviewed", "unreviewable", "not_applicable"}
+MODES = ("report-only", "audit-then-fix")
+RESOLUTIONS = ("fixed", "deferred", "wont_fix")
+# A batch reference in evidence must resolve to an existing file and, when anchored, to text in it.
+BATCH_REF = re.compile(r"batches/[\w.-]+\.md(?:#[^\s;,，；)）]+)?")
 QUALITY_DIMENSIONS = ("structure", "ownership", "duplication", "state_flow",
                       "type_contracts", "failure_orchestration", "clarity_dead_code")
 FINDING_KINDS = ("defect", "maintainability_debt", "improvement_opportunity")
@@ -217,7 +223,7 @@ def initialize(args):
     policy, resolved = resolve_output_language(args.output_language, getattr(args, "resolved_output_language", None))
     snap = snapshot(root, state)
     ledger = {"schema_version": 1, "audit_id": state.name, "root": str(root),
-              "config": {"output_language": policy, "resolved_output_language": resolved, "mode": "report-only",
+              "config": {"output_language": policy, "resolved_output_language": resolved, "mode": getattr(args, "mode", "report-only"),
                          "runtime_audit": args.runtime, "batch_target_units": 15},
               "extra_paths": [], "snapshot": snap,
               "quality_contract_version": 1, "quality_review": new_quality_review(),
@@ -232,11 +238,12 @@ def initialize(args):
         if resolved == "zh-CN" else
         "# Resume\n\nStatus: in_progress. File manifest seeded; semantic discovery and review have not started. Reconcile registries and add semantic units next.\n",
         encoding="utf-8")
-    return {"state_dir": str(state), "files": len(snap["files"]), "status": "in_progress"}
+    return {"state_dir": str(state), "files": len(snap["files"]), "mode": getattr(args, "mode", "report-only"), "status": "in_progress"}
 
 
-def validate(ledger, findings, current):
-    errors, gaps, exclusions = [], [], []
+def validate(ledger, findings, current, state=None):
+    errors, gaps, runtime_gaps, exclusions, warnings = [], [], [], [], []
+    batch_texts = {}
 
     def require(condition, message):
         if not condition:
@@ -248,19 +255,41 @@ def validate(ledger, findings, current):
     def strings(value):
         return isinstance(value, list) and bool(value) and all(filled(x) for x in value)
 
-    def evidence(record, label):
-        require(strings(record.get("evidence")), f"{label}: specific evidence required")
+    def batch_text(name):
+        if name not in batch_texts:
+            path = state / name
+            batch_texts[name] = path.read_text(encoding="utf-8") if path.is_file() else None
+        return batch_texts[name]
 
-    def limitation(record, label):
+    def evidence(record, label):
+        items = record.get("evidence")
+        require(strings(items), f"{label}: specific evidence required")
+        if state is None or not strings(items):
+            return
+        bare = [item for item in items if item.strip() in BATCH_REF.findall(item) and "#" not in item]
+        require(len(bare) < len(items),
+                f"{label}: a bare batch file is not evidence; cite a section anchor or state the observation")
+        for item in items:
+            for ref in BATCH_REF.findall(item):
+                name, _, anchor = ref.partition("#")
+                text = batch_text(name)
+                require(text is not None, f"{label}: cited batch file does not exist: {name}")
+                require(text is None or not anchor or anchor.lower() in text.lower(),
+                        f"{label}: cited anchor not found in {name}: #{anchor}")
+
+    def limitation(record, label, target):
         evidence(record, label)
         for key in ("reason", "impact", "unblock"):
             require(filled(record.get(key)), f"{label}: {key} required")
-        gaps.append({"id": label, **{k: record.get(k) for k in ("reason", "impact", "unblock")}})
+        target.append({"id": label, **{k: record.get(k) for k in ("reason", "impact", "unblock")}})
 
     require(ledger.get("schema_version") == 1, "Unsupported ledger schema_version")
     config = ledger.get("config", {})
-    require(config.get("mode") == "report-only", "This audit contract requires report-only mode")
+    mode = config.get("mode")
+    require(mode in MODES, f"mode must be one of {', '.join(MODES)}")
     require(config.get("runtime_audit") in {"off", "auto", "on"}, "Invalid runtime_audit")
+    # Only runtime=on makes runtime gaps part of the headline result.
+    runtime_target = gaps if config.get("runtime_audit") == "on" else runtime_gaps
     require(filled(config.get("output_language")), "output_language required")
     if config.get("output_language") == "auto":
         require(filled(config.get("resolved_output_language")) and config.get("resolved_output_language") != "auto",
@@ -268,12 +297,17 @@ def validate(ledger, findings, current):
     elif "resolved_output_language" in config:
         require(config["resolved_output_language"] == config.get("output_language"),
                 "Explicit output_language must match resolved_output_language")
+    closed = ledger.get("audit_closed")
+    require(closed is None or (mode == "audit-then-fix" and isinstance(closed, dict)),
+            "audit_closed is only recorded by close-audit in audit-then-fix mode")
     saved = ledger["snapshot"]
     drift = saved.get("fingerprint") != current["fingerprint"] or saved.get("head") != current["head"]
     changed_paths = sorted(p for p in set(saved["files"]) | set(current["files"])
                            if saved["files"].get(p) != current["files"].get(p))
-    require(not drift, "Snapshot changed: reconcile changed units/consumers before accepting a new snapshot")
-    require(saved.get("files") == current["files"], "Saved manifest differs from current files")
+    if not closed:
+        # After close-audit, source changes are the fix phase, not audit drift.
+        require(not drift, "Snapshot changed: reconcile changed units/consumers before accepting a new snapshot")
+        require(saved.get("files") == current["files"], "Saved manifest differs from current files")
     surfaces = ledger.get("surfaces", {})
     require(set(surfaces) == set(CHECKS), "All fixed discovery surfaces must be present exactly once")
     units = ledger.get("units", [])
@@ -282,6 +316,7 @@ def validate(ledger, findings, current):
     ids = [u["id"] for u in units]
     require(all(filled(x) for x in ids) and len(ids) == len(set(ids)), "Unit IDs must be nonempty and unique")
     id_set = set(ids)
+    reviewed_units = set()
     by_surface = {s: [] for s in CHECKS}
     mapped_files = set()
     semantic_evidence = {}
@@ -306,6 +341,7 @@ def validate(ledger, findings, current):
                 f"{label}: unknown/self dependency")
         checks = u.get("checks", {})
         require(set(CHECKS[surface]).issubset(checks), f"{label}: missing required checks")
+        target = runtime_target if surface == "runtime" else gaps
         for name, check in checks.items():
             ref, status = f"{label}/{name}", check.get("status")
             require(status in STATES, f"{ref}: invalid status")
@@ -315,12 +351,13 @@ def validate(ledger, findings, current):
             if status in {"pending", "in_progress", "stale"}:
                 errors.append(f"{ref}: unfinished ({status})")
             elif status == "unreviewable":
-                limitation(check, ref)
+                limitation(check, ref, target)
             elif status == "not_applicable":
                 evidence(check, ref)
                 require(filled(check.get("reason")), f"{ref}: not_applicable reason required")
                 exclusions.append({"id": ref, "reason": check.get("reason"), "evidence": check.get("evidence")})
             else:
+                reviewed_units.add(label)
                 evidence(check, ref)
                 if surface != "file" and strings(check.get("evidence")):
                     shared = semantic_evidence.setdefault(tuple(check["evidence"]), {"units": set(), "checks": []})
@@ -335,7 +372,7 @@ def validate(ledger, findings, current):
         if discovery == "pending":
             errors.append(f"{surface}: discovery not reconciled")
         elif discovery == "unreviewable":
-            limitation(record, f"discovery:{surface}")
+            limitation(record, f"discovery:{surface}", runtime_target if surface == "runtime" else gaps)
         else:
             evidence(record, f"discovery:{surface}")
         if discovery == "complete":
@@ -371,32 +408,59 @@ def validate(ledger, findings, current):
     records = findings.get("findings", [])
     finding_ids = [f["id"] for f in records]
     require(len(finding_ids) == len(set(finding_ids)), "Duplicate finding IDs")
-    required_text = ("id", "title", "trigger", "impact", "root_cause", "counterevidence", "recommendation")
+    confirmed_text = ("trigger", "impact", "root_cause", "counterevidence", "recommendation")
+    remediation = {r: 0 for r in (*RESOLUTIONS, "unresolved")}
     for f in records:
-        ref = f["id"]
-        for key in required_text:
-            require(filled(f.get(key)), f"{ref}: {key} required")
-        require(f.get("status") in {"candidate", "confirmed", "rejected"}, f"{ref}: invalid finding status")
-        require(f.get("status") != "candidate", f"{ref}: unresolved candidate")
-        require(f.get("priority") in {"P0", "P1", "P2", "P3"}, f"{ref}: invalid priority")
-        require(f.get("confidence") in {"high", "medium", "low"}, f"{ref}: invalid confidence")
-        require(filled(f.get("category")), f"{ref}: category required")
+        ref, status = f["id"], f.get("status")
+        require(filled(ref) and filled(f.get("title")), f"{ref}: id and title required")
+        require(status in {"candidate", "confirmed", "rejected"}, f"{ref}: invalid finding status")
+        require(status != "candidate", f"{ref}: unresolved candidate")
         evidence(f, ref)
         require(strings(f.get("unit_ids")) and all(x in id_set for x in f.get("unit_ids", [])), f"{ref}: valid unit_ids required")
-        for key in ("acceptance_checks", "fix_scope"):
-            require(strings(f.get(key)), f"{ref}: {key} required")
         require(all(x in finding_ids and x != ref for x in f.get("depends_on", [])), f"{ref}: invalid finding dependency")
-        verification = f.get("verification", {})
-        require(verification.get("method") in {"static", "test", "runtime", "history", "mixed"}
-                and filled(verification.get("result")) and filled(verification.get("details")), f"{ref}: verification required")
-        require(isinstance(f.get("locations"), list), f"{ref}: locations must be an array")
+        require(isinstance(f.get("locations", []), list), f"{ref}: locations must be an array")
         for loc in f.get("locations", []):
             require(loc.get("path") in saved["files"], f"{ref}: location path absent from manifest")
             start, end = loc.get("start_line"), loc.get("end_line")
-            require(isinstance(start, int) and not isinstance(start, bool) and isinstance(end, int)
-                    and not isinstance(end, bool) and 1 <= start <= end, f"{ref}: invalid line range")
-        if f.get("status") == "rejected":
+            if start is not None or end is not None:
+                require(isinstance(start, int) and not isinstance(start, bool) and isinstance(end, int)
+                        and not isinstance(end, bool) and 1 <= start <= end, f"{ref}: invalid line range")
+        if status == "rejected":
             require(filled(f.get("rejection_reason")), f"{ref}: rejection_reason required")
+            require("resolution" not in f, f"{ref}: a rejected candidate cannot carry a fix resolution")
+        if status != "confirmed":
+            continue
+        for key in confirmed_text:
+            require(filled(f.get(key)), f"{ref}: {key} required")
+        require(f.get("priority") in {"P0", "P1", "P2", "P3"}, f"{ref}: invalid priority")
+        require(f.get("confidence") in {"high", "medium", "low"}, f"{ref}: invalid confidence")
+        require(filled(f.get("category")), f"{ref}: category required")
+        for key in ("acceptance_checks", "fix_scope"):
+            require(strings(f.get(key)), f"{ref}: {key} required")
+        verification = f.get("verification", {})
+        require(verification.get("method") in {"static", "test", "runtime", "history", "mixed"}
+                and filled(verification.get("result")) and filled(verification.get("details")), f"{ref}: verification required")
+        require(bool(reviewed_units.intersection(f.get("unit_ids", []))),
+                f"{ref}: a confirmed finding needs at least one reviewed check on its units")
+        resolution = f.get("resolution")
+        if resolution is None:
+            remediation["unresolved"] += 1
+            continue
+        require(bool(closed), f"{ref}: record resolutions only after close-audit in audit-then-fix mode")
+        require(isinstance(resolution, dict) and resolution.get("status") in RESOLUTIONS
+                and filled(resolution.get("details")), f"{ref}: resolution needs status ({'/'.join(RESOLUTIONS)}) and details")
+        if isinstance(resolution, dict) and resolution.get("status") in RESOLUTIONS:
+            remediation[resolution["status"]] += 1
+            if resolution["status"] == "fixed":
+                require(filled(resolution.get("verification")), f"{ref}: a fixed resolution needs verification")
+    # Identical narrative across findings usually means a template, not a per-finding observation.
+    for key in ("counterevidence",):
+        values = {}
+        for f in records:
+            if f.get("status") == "confirmed" and filled(f.get(key)):
+                values.setdefault(f[key].strip(), []).append(f["id"])
+        warnings.extend(f"{len(v)} findings share identical {key}; state what was checked for each: {', '.join(v[:6])}"
+                        for v in values.values() if len(v) > 2)
     for u in units:
         require(all(x in finding_ids for x in u.get("finding_ids", [])), f"{u['id']}: unknown finding_ids")
     quality = {"status": "legacy_not_assessed", "contract_version": None}
@@ -423,7 +487,7 @@ def validate(ledger, findings, current):
             if status in {"pending", "in_progress", "stale"}:
                 errors.append(f"{ref}: unfinished ({status})")
             elif status == "unreviewable":
-                limitation(review, ref)
+                limitation(review, ref, gaps)
                 represented.update(scoped_units)
             elif status == "not_applicable":
                 evidence(review, ref)
@@ -442,38 +506,55 @@ def validate(ledger, findings, current):
             require(kind in FINDING_KINDS, f"{ref}: kind must classify defect, debt or opportunity")
             dims = finding.get("quality_dimensions")
             require(isinstance(dims, list) and all(d in QUALITY_DIMENSIONS for d in dims), f"{ref}: invalid quality_dimensions")
+            if finding.get("status") != "confirmed":
+                continue
             if kind in {"maintainability_debt", "improvement_opportunity"}:
                 require(bool(dims), f"{ref}: debt/opportunity needs a quality dimension")
                 require(finding.get('priority') in {'P2', 'P3'}, f"{ref}: a P0/P1 behavioral risk belongs in defect")
                 require(filled(finding.get("tradeoffs")), f"{ref}: tradeoffs required")
                 require(strings(finding.get("behavior_to_preserve")), f"{ref}: behavior_to_preserve required")
-            if finding.get("status") == "confirmed":
-                for dimension in dims or []:
-                    review = dimensions.get(dimension, {})
-                    require(ref in review.get("finding_ids", []), f"{ref}: missing from quality:{dimension} finding_ids")
-                    require(set(finding.get("unit_ids", [])) <= set(review.get("unit_ids", [])),
-                            f"{ref}: affected units missing from quality:{dimension} scope")
+            for dimension in dims or []:
+                review = dimensions.get(dimension, {})
+                require(ref in review.get("finding_ids", []), f"{ref}: missing from quality:{dimension} finding_ids")
+                require(set(finding.get("unit_ids", [])) <= set(review.get("unit_ids", [])),
+                        f"{ref}: affected units missing from quality:{dimension} scope")
         quality = {"contract_version": 1,
                    "status": "in_progress" if len(errors) > before_errors else
                    ("complete_with_limitations" if len(gaps) > before_gaps else "complete"),
                    "dimension_counts": {s: sum(d.get("status") == s for d in dimensions.values()) for s in sorted(STATES)},
                    "finding_counts": {kind: sum(f.get("kind") == kind and f.get("status") == "confirmed" for f in records)
                                       for kind in FINDING_KINDS}}
-    return {"schema_version": 1, "generated_at": now(), "audit_id": ledger.get("audit_id"),
-            "status": "in_progress" if errors else ("complete_with_limitations" if gaps else "complete"),
-            "quality_approval": "not_implied", "snapshot_changed": drift, "changed_paths": changed_paths,
-            "source_snapshot": {"root": ledger["root"], "head": saved.get("head"), "fingerprint": saved.get("fingerprint")},
-            "surfaces": coverage, "limitations": gaps, "exclusions": exclusions, "errors": errors,
-            "quality_review": quality,
-            "warnings": (["Legacy contract: this result does not certify the expanded code-quality review; run upgrade before resuming"]
-                         if quality['status'] == 'legacy_not_assessed' else []),
-            "evidence_reuse": sorted(
-                [{"unit_count": len(group["units"]), "check_count": len(group["checks"]),
-                  "evidence": list(evidence_key), "sample_checks": group["checks"][:8]}
-                 for evidence_key, group in semantic_evidence.items() if len(group["units"]) > 1],
-                key=lambda group: (-group["check_count"], group["sample_checks"][0])),
-            "finding_counts": {s: sum(f.get("status") == s for f in records)
-                               for s in ("confirmed", "candidate", "rejected")}}
+    if quality['status'] == 'legacy_not_assessed':
+        warnings.append("Legacy contract: this result does not certify the expanded code-quality review; run upgrade before resuming")
+    groups = {}
+    for gap in gaps + runtime_gaps:
+        key = tuple(gap.get(k) or "" for k in ("reason", "impact", "unblock"))
+        groups.setdefault(key, []).append(gap["id"])
+    result = {"schema_version": 1, "generated_at": now(), "audit_id": ledger.get("audit_id"),
+              "mode": mode, "phase": "fix" if closed else "audit",
+              "status": "in_progress" if errors else ("complete_with_limitations" if gaps else "complete"),
+              "quality_approval": "not_implied", "snapshot_changed": drift, "changed_paths": changed_paths,
+              "source_snapshot": {"root": ledger["root"], "head": saved.get("head"), "fingerprint": saved.get("fingerprint")},
+              "surfaces": coverage, "limitations": gaps,
+              "runtime": {"runtime_audit": config.get("runtime_audit"),
+                          "counts_toward_status": config.get("runtime_audit") == "on",
+                          "limitations": runtime_gaps},
+              "limitation_groups": [{"reason": k[0], "impact": k[1], "unblock": k[2], "count": len(v), "ids": v}
+                                    for k, v in sorted(groups.items(), key=lambda item: -len(item[1]))],
+              "exclusions": exclusions, "errors": errors,
+              "quality_review": quality, "warnings": warnings,
+              "evidence_reuse": sorted(
+                  [{"unit_count": len(group["units"]), "check_count": len(group["checks"]),
+                    "evidence": list(evidence_key), "sample_checks": group["checks"][:8]}
+                   for evidence_key, group in semantic_evidence.items() if len(group["units"]) > 1],
+                  key=lambda group: (-group["check_count"], group["sample_checks"][0])),
+              "finding_counts": {s: sum(f.get("status") == s for f in records)
+                                 for s in ("confirmed", "candidate", "rejected")}}
+    if mode == "audit-then-fix":
+        result["remediation"] = {"audit_closed": closed, "counts": remediation,
+                                 "status": "not_started" if not closed else
+                                 ("complete" if not remediation["unresolved"] else "in_progress")}
+    return result
 
 
 def quality_labels(state, config):
@@ -499,11 +580,144 @@ def quality_catalog(ledger, findings, result):
             "language": ledger['config'].get('resolved_output_language', ledger['config']['output_language']),
             "review_scope": {key: ledger['config'][key] for key in ('mode', 'runtime_audit')},
             "dimensions": ledger.get('quality_review', {}), "limitations": result['limitations'],
+            "runtime_limitations": result['runtime']['limitations'],
             "exclusions": result['exclusions'],
             "groups": {kind: sorted([f for f in records if f.get('status') == 'confirmed' and f.get('kind') == kind],
                                      key=lambda f: (f['priority'], f['id'])) for kind in FINDING_KINDS},
             "pending": [f for f in records if f.get('status') == 'candidate' or f.get('kind') not in FINDING_KINDS],
             "rejected": [f for f in records if f.get('status') == 'rejected' and f.get('kind') in FINDING_KINDS]}
+
+
+def location_link(catalog, loc):
+    suffix = f":{loc['start_line']}" if loc.get('start_line') else ""
+    return f"- [{loc['path']}{suffix}](<{Path(catalog['source_snapshot']['root']) / loc['path']}{suffix}>)"
+
+
+def as_list(value):
+    return [value] if isinstance(value, str) else list(value or [])
+
+
+def apply_ops(ledger, findings, ops):
+    """Record review progress from JSON operations; any invalid operation aborts the whole batch."""
+    units = {u["id"]: u for u in ledger["units"]}
+    records = {f["id"]: f for f in findings["findings"]}
+    applied = {}
+
+    def fail(index, message):
+        raise ValueError(f"operation {index + 1}: {message}")
+
+    def set_status(record, op, index):
+        status = op.get("status", "reviewed")
+        if status not in STATES:
+            fail(index, f"invalid status {status}")
+        record["status"] = status
+        if "evidence" in op:
+            record["evidence"] = as_list(op["evidence"])
+        for key in ("reason", "impact", "unblock"):
+            if key in op:
+                record[key] = op[key]
+
+    for index, op in enumerate(ops):
+        kind = op.get("op")
+        if kind == "unit":
+            surface = op.get("surface")
+            if surface not in CHECKS or not op.get("label"):
+                fail(index, "unit needs a known surface and a label")
+            record = units.get(op.get("id") or f"{surface}:{op['label']}")
+            if record is None:
+                record = unit(surface, op["label"], as_list(op.get("sources")))
+                if op.get("id"):
+                    record["id"] = op["id"]
+                ledger["units"].append(record)
+                units[record["id"]] = record
+            elif "sources" in op:
+                record["sources"] = as_list(op["sources"])
+            for key in ("depends_on", "notes"):
+                if key in op:
+                    record[key] = op[key]
+            for name in as_list(op.get("checks")):
+                record["checks"].setdefault(name, {"status": "pending", "evidence": []})
+        elif kind == "review":
+            targets = as_list(op.get("units") or op.get("unit"))
+            if not targets:
+                fail(index, "review needs unit or units")
+            for unit_id in targets:
+                record = units.get(unit_id) or fail(index, f"unknown unit {unit_id}")
+                names = list(record["checks"]) if op.get("checks", "all") == "all" else as_list(op["checks"])
+                for name in names:
+                    set_status(record["checks"].get(name) or fail(index, f"{unit_id} has no check {name}"), op, index)
+                for key in ("batch_id", "finding_ids"):
+                    if key in op:
+                        record[key] = op[key]
+        elif kind == "classify":
+            patterns = as_list(op.get("pattern") or op.get("paths"))
+            matched = [u for u in ledger["units"] if u["surface"] == "file"
+                       and any(fnmatch.fnmatchcase(u["sources"][0], pattern) for pattern in patterns)]
+            if not matched:
+                fail(index, f"no file units match {patterns}")
+            for record in matched:
+                set_status(record["checks"]["classification"], op, index)
+        elif kind == "surface":
+            if op.get("surface") not in CHECKS:
+                fail(index, "unknown surface")
+            record = ledger["surfaces"][op["surface"]]
+            if op.get("status", "complete") not in {"pending", "complete", "not_applicable", "unreviewable"}:
+                fail(index, "invalid discovery status")
+            record["status"] = op.get("status", "complete")
+            for key in ("evidence", "reason", "impact", "unblock"):
+                if key in op:
+                    record[key] = as_list(op[key]) if key == "evidence" else op[key]
+        elif kind == "finding":
+            fields = {k: v for k, v in op.items() if k != "op"}
+            if not fields.get("id"):
+                fail(index, "finding needs an id")
+            record = records.get(fields["id"])
+            if record is None:
+                record = {"depends_on": [], "history": [], "locations": []}
+                findings["findings"].append(record)
+                records[fields["id"]] = record
+            record.update(fields)
+        elif kind == "quality":
+            dimension = op.get("dimension")
+            if dimension not in QUALITY_DIMENSIONS:
+                fail(index, "unknown quality dimension")
+            record = ledger.setdefault("quality_review", new_quality_review())[dimension]
+            if "status" in op:
+                set_status(record, op, index)
+            elif "evidence" in op:
+                record["evidence"] = as_list(op["evidence"])
+            for unit_id in as_list(op.get("add_unit_ids")):
+                if unit_id not in units:
+                    fail(index, f"unknown unit {unit_id}")
+                if unit_id not in record["unit_ids"]:
+                    record["unit_ids"].append(unit_id)
+        elif kind == "resolve":
+            record = records.get(op.get("finding")) or fail(index, f"unknown finding {op.get('finding')}")
+            record["resolution"] = {k: v for k, v in op.items() if k not in {"op", "finding"}}
+        else:
+            fail(index, f"unknown op {kind!r}")
+        applied[kind] = applied.get(kind, 0) + 1
+    # Keep the quality matrix consistent with the catalog so agents never maintain both directions by hand.
+    if ledger.get("quality_contract_version") == 1:
+        for dimension, review in ledger["quality_review"].items():
+            review["finding_ids"] = [f["id"] for f in findings["findings"] if f.get("status") == "confirmed"
+                                     and dimension in (f.get("quality_dimensions") or [])]
+            for f in findings["findings"]:
+                if f["id"] in review["finding_ids"]:
+                    review["unit_ids"].extend(u for u in f.get("unit_ids", []) if u not in review["unit_ids"])
+    return applied
+
+
+def close_audit(state, ledger, result):
+    if ledger["config"].get("mode") != "audit-then-fix":
+        raise ValueError("close-audit applies only to audit-then-fix mode")
+    if result["status"] == "in_progress":
+        return result
+    ledger["audit_closed"] = {"at": now(), "status": result["status"], "head": ledger["snapshot"].get("head"),
+                              "fingerprint": ledger["snapshot"].get("fingerprint")}
+    atomic_json(state / "ledger.json", ledger)
+    atomic_json(state / "coverage-audit.json", result)
+    return {**result, "phase": "fix", "next_action": "Audit closed; fix confirmed findings and record each with resolve"}
 
 
 def render_quality(catalog, labels):
@@ -533,8 +747,7 @@ def render_quality(catalog, labels):
             for field, value in finding.items():
                 if field not in {'id', 'title', 'priority'}:
                     if field == 'locations' and value:
-                        rendered = "\n\n".join(
-                            f"- [{loc['path']}:{loc['start_line']}](<{Path(catalog['source_snapshot']['root']) / loc['path']}:{loc['start_line']}>)"
+                        rendered = "\n\n".join(location_link(catalog, loc)
                             + "\n\n" + text_value({key: item for key, item in loc.items() if key not in {'path', 'start_line'}})
                             for loc in value)
                     else:
@@ -544,6 +757,7 @@ def render_quality(catalog, labels):
     for dimension, record in catalog['dimensions'].items():
         lines.extend([f"### {dimension}", "", text_value(record), ""])
     scope_notes = {'unreviewable': catalog['limitations'],
+                   'runtime_unreviewable': catalog['runtime_limitations'],
                    'exclusions': [entry for entry in catalog['exclusions'] if not entry['id'].startswith('file:')],
                    'file_exclusions_count': sum(entry['id'].startswith('file:') for entry in catalog['exclusions']),
                    'full_exclusions': 'coverage.json'}
@@ -551,20 +765,37 @@ def render_quality(catalog, labels):
     return "\n".join(lines)
 
 
+def run_check(state, ledger, findings, current):
+    result = validate(ledger, findings, current, state)
+    if ledger.get('quality_contract_version') == 1:
+        labels, localization_error = quality_labels(state, ledger['config'])
+        if localization_error:
+            result['errors'].append(localization_error)
+            result['status'] = 'in_progress'
+        catalog = quality_catalog(ledger, findings, result)
+        atomic_json(state / 'code-quality.json', catalog)
+        atomic_text(state / 'code-quality.md', render_quality(catalog, labels))
+    atomic_json(state / "coverage.json", result)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("init", "snapshot", "check", "upgrade"):
+    for name in ("init", "snapshot", "apply", "check", "close-audit", "upgrade"):
         command = sub.add_parser(name)
         command.add_argument("--state-dir", type=Path, required=True)
         if name in {"init", "snapshot"}:
             command.add_argument("--root", type=Path, required=True)
+        if name == "apply":
+            command.add_argument("--file", type=Path, help="JSON Lines operations; reads stdin when omitted")
         if name == "init":
             command.add_argument("--output-language", default="auto",
                                  help="auto follows the agent's user-language decision; a language tag overrides it")
             command.add_argument("--resolved-output-language",
                                  help="Concrete language chosen by the agent for auto mode; standalone fallback: en")
             command.add_argument("--runtime", choices=("off", "auto", "on"), default="auto")
+            command.add_argument("--mode", choices=MODES, default="report-only")
     args = parser.parse_args()
     state = args.state_dir.resolve()
     ledger = {}
@@ -573,27 +804,29 @@ def main():
             result = initialize(args)
         elif args.command == "upgrade":
             result = upgrade_quality(state)
+        elif args.command == "apply":
+            ledger = json.loads((state / "ledger.json").read_text(encoding="utf-8"))
+            findings = json.loads((state / "findings.json").read_text(encoding="utf-8"))
+            text = args.file.read_text(encoding="utf-8") if args.file else sys.stdin.read()
+            ops = [json.loads(line) for line in text.splitlines() if line.strip()]
+            result = {"applied": apply_ops(ledger, findings, ops)}
+            atomic_json(state / "findings.json", findings)
+            atomic_json(state / "ledger.json", ledger)
         else:
             ledger_path = state / "ledger.json"
             ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {}
-            root = Path(ledger["root"]).resolve() if args.command == "check" else args.root.resolve()
+            root = Path(ledger["root"]).resolve() if args.command != "snapshot" else args.root.resolve()
             current = snapshot(root, state, ledger.get("extra_paths", []))
             if args.command == "snapshot":
                 result = current
             else:
                 findings = json.loads((state / "findings.json").read_text(encoding="utf-8"))
-                result = validate(ledger, findings, current)
-                if ledger.get('quality_contract_version') == 1:
-                    labels, localization_error = quality_labels(state, ledger['config'])
-                    if localization_error:
-                        result['errors'].append(localization_error)
-                        result['status'] = 'in_progress'
-                    catalog = quality_catalog(ledger, findings, result)
-                    atomic_json(state / 'code-quality.json', catalog)
-                    atomic_text(state / 'code-quality.md', render_quality(catalog, labels))
-                atomic_json(state / "coverage.json", result)
+                result = run_check(state, ledger, findings, current)
+                if args.command == "close-audit":
+                    result = close_audit(state, ledger, result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 2 if args.command == "check" and result["status"] == "in_progress" else 0
+        unfinished = result.get("status") == "in_progress" or result.get("remediation", {}).get("status") == "in_progress"
+        return 2 if args.command in {"check", "close-audit"} and unfinished else 0
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         failure = {"status": "in_progress", "errors": [f"Invalid state or execution failure: {error}"]}
         if args.command == "check" and state.is_dir():

@@ -3,7 +3,7 @@
 Use available project tests, browser tools or an existing Playwright setup. Playwright is an example, never a hard dependency. Libraries/CLIs can use suitable smoke checks instead.
 
 - `off`: runtime discovery is `not_applicable`, with an explicit static-only scope reason.
-- `auto`: assess existing scripts, URLs, tools and test accounts. Use a suitable authorized environment when available. Declare selected routes/roles/viewports and all omitted runtime scope. With no environment, record why runtime was not performed; static work continues.
+- `auto`: assess existing scripts, URLs, tools and test accounts. Use a suitable authorized environment when available. Declare selected routes/roles/viewports and all omitted runtime scope. With no safe environment, set runtime discovery to `unreviewable` once, naming the missing environment, rather than creating runtime units whose every check repeats the same gap. Runtime gaps under `auto` are reported separately and do not set the headline result; static work continues.
 - `on`: enumerate the requested runtime matrix. Missing setup/accounts/tools becomes `unreviewable`, with reason, impact and unblock action. Ask only for genuinely missing prerequisites while continuing independent static work; do not silently downgrade to off.
 
 `off` disables the dedicated environment/browser audit, not all code execution. Existing local unit tests and isolated deterministic reproductions may support the source review when within authorization and without modifying the audited project or external systems. Label that evidence `test`/`mixed`, not source-only `static`, and do not count it as runtime-environment coverage. An explicit user instruction to execute no code takes precedence.

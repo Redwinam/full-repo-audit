@@ -6,7 +6,7 @@ English · [简体中文](README.zh-CN.md)
 
 Review the current complete project, including old and unchanged code. Build an inventory, inspect each applicable page, route, API, database object, permission policy and background job, persist evidence, resume interrupted batches, and finish with cross-reference checks.
 
-The default is **report-only**. Instructions and machine-readable keys stay in English; reports follow the user's language automatically. Code symbols, paths, commands and error messages remain unchanged.
+The default is **report-only**. Asking it to fix what it finds switches to **audit-then-fix**: the audit closes first, then each finding is fixed and recorded with how the fix was verified. Instructions and machine-readable keys stay in English; reports follow the user's language automatically. Code symbols, paths, commands and error messages remain unchanged.
 
 Code quality has a dedicated, complete report: confirmed defects, maintainability debt, and optional structural improvements. A concise chat summary never replaces the full item-by-item catalog.
 
@@ -14,7 +14,7 @@ Code quality has a dedicated, complete report: confirmed defects, maintainabilit
 
 Requires Python 3.10+. The installer and audit helper use only the standard library. Playwright, external model APIs and deployment credentials are not required. Installation and automated checks currently cover macOS and Linux.
 
-Both hosts share one `skills/full-repo-audit/`, so the review rules are maintained once. Host differences stay at the edges: `agents/openai.yaml` serves the Codex UI, and `.claude-plugin/` makes this repository installable as a Claude Code plugin.
+Both hosts share one `skills/full-repo-audit/`, so the review rules are maintained once. Host differences stay at the edges: `.codex-plugin/` with `.agents/plugins/` and `.claude-plugin/` make this repository installable as a plugin in each host, and `agents/openai.yaml` serves the Codex UI.
 
 ### Claude Code
 
@@ -34,6 +34,22 @@ python3 tools/install_skill.py --agent claude
 `--replace` and `--link` work as described for Codex below; add `--agent claude`.
 
 ### Codex
+
+Install as a plugin from GitHub:
+
+```bash
+codex plugin marketplace add Redwinam/full-repo-audit
+codex plugin add full-repo-audit@full-repo-audit
+```
+
+To upgrade later, refresh the snapshot and install again:
+
+```bash
+codex plugin marketplace upgrade full-repo-audit
+codex plugin add full-repo-audit@full-repo-audit
+```
+
+Alternatively, copy the Skill with the installer:
 
 ```bash
 git clone https://github.com/Redwinam/full-repo-audit.git
@@ -73,7 +89,15 @@ Use $full-repo-audit with runtime_audit=on and output_language=ja.
 Use $full-repo-audit to resume the audit at the state-dir from the previous report. Reconcile the snapshot before continuing pending units.
 ```
 
-`runtime_audit=auto` uses a suitable existing environment. `off` selects static review. `on` includes the requested runtime checks; unavailable prerequisites remain explicit limitations while independent static work continues.
+`runtime_audit=auto` uses a suitable existing environment. `off` selects static review. `on` includes the requested runtime checks; unavailable prerequisites remain explicit limitations while independent static work continues. Under `auto`, missing runtime environments are reported in a separate runtime section and do not downgrade the headline result; only `on` makes them count.
+
+To audit and then fix:
+
+```text
+Use $full-repo-audit to audit this entire project, then fix everything it finds.
+```
+
+The agent closes the audit before touching source, then records each finding as `fixed` (with the verification run), `deferred` or `wont_fix`.
 
 ## Language behavior
 
@@ -152,6 +176,8 @@ The agent normally runs these commands. Replace the example paths with the actua
 python3 skills/full-repo-audit/scripts/audit_state.py init \
   --root /path/to/project --state-dir /path/to/audit-state \
   --resolved-output-language en
+python3 skills/full-repo-audit/scripts/audit_state.py apply \
+  --state-dir /path/to/audit-state --file ops.jsonl
 python3 skills/full-repo-audit/scripts/audit_state.py check \
   --state-dir /path/to/audit-state
 ```

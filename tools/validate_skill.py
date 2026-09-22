@@ -39,6 +39,14 @@ def main():
     marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
     if [(entry.get("name"), entry.get("source")) for entry in marketplace.get("plugins", [])] != [(SKILL.name, "./")]:
         errors.append("Claude marketplace must list this repository as its only plugin")
+    codex = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    if codex.get("name") != SKILL.name or codex.get("skills") != "./skills/":
+        errors.append("Codex plugin must be named after the Skill and expose ./skills/")
+    if codex.get("version") != plugin.get("version"):
+        errors.append("Claude and Codex plugin versions must match")
+    codex_market = json.loads((ROOT / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8"))
+    if [(entry.get("name"), entry.get("source", {}).get("path")) for entry in codex_market.get("plugins", [])] != [(SKILL.name, "./")]:
+        errors.append("Codex marketplace must list this repository as its only plugin")
     for path in [*ROOT.glob("README*.md"), *SKILL.rglob("*.md")]:
         text = path.read_text(encoding="utf-8")
         for target in re.findall(r"\]\(([^)]+)\)", text):

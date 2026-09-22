@@ -7,5 +7,12 @@
   },
   "homepage": "https://github.com/Redwinam/full-repo-audit",
   "repository": "https://github.com/Redwinam/full-repo-audit",
-  "keywords": ["audit", "code-review", "code-quality", "coverage"]
+  "keywords": ["audit", "code-review", "code-quality", "coverage"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Full Repository Audit",
+    "shortDescription": "Audit full repositories with resumable coverage ledgers",
+    "developerName": "Redwinam",
+    "category": "Developer Tools"
+  }
 }
