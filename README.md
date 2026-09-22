@@ -6,7 +6,7 @@ English · [简体中文](README.zh-CN.md)
 
 Review the current complete project, including old and unchanged code. Build an inventory, inspect each applicable page, route, API, database object, permission policy and background job, persist evidence, resume interrupted batches, and finish with cross-reference checks.
 
-The default is **report-only**. Instructions and machine-readable keys stay in English; reports follow the user's language automatically. Code symbols, paths, commands and error messages remain unchanged.
+The default is **report-only**. Asking it to fix what it finds switches to **audit-then-fix**: the audit closes first, then each finding is fixed and recorded with how the fix was verified. Instructions and machine-readable keys stay in English; reports follow the user's language automatically. Code symbols, paths, commands and error messages remain unchanged.
 
 Code quality has a dedicated, complete report: confirmed defects, maintainability debt, and optional structural improvements. A concise chat summary never replaces the full item-by-item catalog.
 
@@ -73,7 +73,15 @@ Use $full-repo-audit with runtime_audit=on and output_language=ja.
 Use $full-repo-audit to resume the audit at the state-dir from the previous report. Reconcile the snapshot before continuing pending units.
 ```
 
-`runtime_audit=auto` uses a suitable existing environment. `off` selects static review. `on` includes the requested runtime checks; unavailable prerequisites remain explicit limitations while independent static work continues.
+`runtime_audit=auto` uses a suitable existing environment. `off` selects static review. `on` includes the requested runtime checks; unavailable prerequisites remain explicit limitations while independent static work continues. Under `auto`, missing runtime environments are reported in a separate runtime section and do not downgrade the headline result; only `on` makes them count.
+
+To audit and then fix:
+
+```text
+Use $full-repo-audit to audit this entire project, then fix everything it finds.
+```
+
+The agent closes the audit before touching source, then records each finding as `fixed` (with the verification run), `deferred` or `wont_fix`.
 
 ## Language behavior
 
@@ -152,6 +160,8 @@ The agent normally runs these commands. Replace the example paths with the actua
 python3 skills/full-repo-audit/scripts/audit_state.py init \
   --root /path/to/project --state-dir /path/to/audit-state \
   --resolved-output-language en
+python3 skills/full-repo-audit/scripts/audit_state.py apply \
+  --state-dir /path/to/audit-state --file ops.jsonl
 python3 skills/full-repo-audit/scripts/audit_state.py check \
   --state-dir /path/to/audit-state
 ```

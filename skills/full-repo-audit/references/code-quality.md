@@ -88,7 +88,7 @@ Example shape:
 }
 ```
 
-All units with applicable `maintainability` checks must be represented in the dimension scopes; also include relevant API/job/permission/etc. boundaries. This is not a file-by-seven Cartesian checklist: choose relevant dimensions and explain scope. It complements rather than replaces unit-level checks. Confirmed findings and dimension `finding_ids` must reference each other; every affected unit must be included in that dimension's scope.
+`apply` keeps each dimension's `finding_ids` in sync with the confirmed findings' `quality_dimensions` and adds their units to the scope; record the dimension's own status, evidence and further scope with the `quality` operation. All units with applicable `maintainability` checks must be represented in the dimension scopes; also include relevant API/job/permission/etc. boundaries. This is not a file-by-seven Cartesian checklist: choose relevant dimensions and explain scope. It complements rather than replaces unit-level checks. Confirmed findings and dimension `finding_ids` must reference each other; every affected unit must be included in that dimension's scope.
 
 During the final cross-reference pass, reconcile batch observations, per-unit conclusions, quality dimensions and the canonical finding catalog. Ensure debt and optional improvements have not been lost during summarization. Resolve candidates; keep unreachable/uninspectable areas as limitations. Do not rewrite an entire product to settle an audit observation.
 

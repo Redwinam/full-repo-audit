@@ -1,8 +1,8 @@
 # Review standards
 
-## Adaptation of the user-supplied Grok Skill
+## Quality standards
 
-The supplied `Strict Code Quality Review` targets current-branch changes. Retain ambitious structural simplification, rigorous checking, canonical ownership and high-conviction findings. Extend these to all current code without inventing a historical regression. Do not impose a small-number quota: every identified, worthwhile, evidenced defect, maintenance cost or concrete improvement belongs in the full catalog. Claimed Cursor lineage has not been independently verified.
+Apply ambitious structural simplification, rigorous checking and canonical ownership to all current code, without inventing historical regressions. Every identified, worthwhile, evidenced defect, maintenance cost or concrete improvement belongs in the catalog.
 
 - **Structural simplification / code judo:** seek designs that remove concepts, branches, modes or layers while preserving behavior. Require a concrete simpler alternative, current maintenance cost, compatibility constraints and verification plan. Moving complexity is not removing it; speculative redesign is not a blocker.
 - **File size / cohesion:** 1,000 lines is an inspection trigger, not an automatic defect. Evaluate responsibilities, coupling, ownership and navigation; name coherent extraction boundaries and expected benefit. Record generated/declarative exceptions. Do not claim an existing file recently crossed the threshold without history evidence.

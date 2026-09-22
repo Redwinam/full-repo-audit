@@ -1,6 +1,6 @@
 {
   "name": "full-repo-audit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Coverage-driven whole-repository audit with resumable ledgers, cross-reference checks and a complete code-quality catalog.",
   "author": {
     "name": "Redwinam"
