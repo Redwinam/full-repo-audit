@@ -15,10 +15,10 @@ NAME = "full-repo-audit"
 SOURCE = Path(__file__).resolve().parents[1] / "skills" / NAME
 
 
-def install(source, codex_home, *, link=False, replace=False):
+def install(source, home, *, link=False, replace=False):
     source = source.resolve()
-    codex_home = codex_home.expanduser().resolve()
-    target = codex_home / "skills" / NAME
+    home = home.expanduser().resolve()
+    target = home / "skills" / NAME
     if not (source / "SKILL.md").is_file():
         raise ValueError("Source must contain SKILL.md")
     if target.is_symlink() and target.resolve() == source and link:
@@ -32,7 +32,7 @@ def install(source, codex_home, *, link=False, replace=False):
     target.parent.mkdir(parents=True, exist_ok=True)
     backup = None
     # Stage first so a failed copy cannot displace an existing working Skill.
-    with tempfile.TemporaryDirectory(prefix=".skill-install-", dir=codex_home) as staging:
+    with tempfile.TemporaryDirectory(prefix=".skill-install-", dir=home) as staging:
         payload = Path(staging) / NAME
         if link:
             payload.symlink_to(source, target_is_directory=True)
@@ -40,7 +40,7 @@ def install(source, codex_home, *, link=False, replace=False):
             shutil.copytree(source, payload, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         if exists:
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            backup = codex_home / "skill-backups" / f"{NAME}-{stamp}-{uuid.uuid4().hex[:8]}"
+            backup = home / "skill-backups" / f"{NAME}-{stamp}-{uuid.uuid4().hex[:8]}"
             backup.parent.mkdir(parents=True, exist_ok=True)
             if target.is_symlink():
                 old_link = Path(os.readlink(target))
@@ -60,15 +60,27 @@ def install(source, codex_home, *, link=False, replace=False):
             "mode": "link" if link else "copy", "backup": str(backup) if backup else None}
 
 
+# Each host discovers Skills under <home>/skills and honors its own home override.
+AGENT_HOMES = {"codex": ("CODEX_HOME", ".codex"), "claude": ("CLAUDE_CONFIG_DIR", ".claude")}
+
+
+def default_home(agent, environ=os.environ):
+    variable, fallback = AGENT_HOMES[agent]
+    return Path(environ.get(variable) or Path.home() / fallback)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--codex-home", type=Path,
-                        default=Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex"))
+    parser.add_argument("--agent", choices=sorted(AGENT_HOMES), default="codex",
+                        help="Host whose Skill directory receives the installation")
+    parser.add_argument("--home", "--codex-home", type=Path,
+                        help="Override the host configuration directory")
     parser.add_argument("--link", action="store_true", help="Link to this checkout instead of copying")
     parser.add_argument("--replace", action="store_true", help="Back up an existing installation before replacing it")
     args = parser.parse_args()
     try:
-        result = install(SOURCE, args.codex_home, link=args.link, replace=args.replace)
+        home = args.home or default_home(args.agent)
+        result = install(SOURCE, home, link=args.link, replace=args.replace)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (OSError, ValueError) as error:

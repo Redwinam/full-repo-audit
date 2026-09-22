@@ -1,0 +1,11 @@
+{
+  "name": "full-repo-audit",
+  "version": "0.1.0",
+  "description": "Coverage-driven whole-repository audit with resumable ledgers, cross-reference checks and a complete code-quality catalog.",
+  "author": {
+    "name": "Redwinam"
+  },
+  "homepage": "https://github.com/Redwinam/full-repo-audit",
+  "repository": "https://github.com/Redwinam/full-repo-audit",
+  "keywords": ["audit", "code-review", "code-quality", "coverage"]
+}

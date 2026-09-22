@@ -2,7 +2,7 @@
 
 [English](README.md) · 简体中文
 
-**Coverage-driven whole-repository audit for Codex.**
+**Coverage-driven whole-repository audit for Codex and Claude Code.**
 
 以覆盖率驱动的全仓库审查 Skill：从当前完整项目建立 inventory，逐页面、路由、API、数据库对象、权限策略和后台任务审查，分批记录证据，支持中断续审，最后做跨模块核对。
 
@@ -13,6 +13,27 @@
 ## 安装
 
 需要 Python 3.10+。安装工具和审查账本工具只使用标准库；不要求 Playwright、外部模型 API 或部署凭据。当前安装与自动测试支持 macOS 和 Linux。
+
+两个平台共用同一个 `skills/full-repo-audit/`，审查规则只维护一份。平台差异只在外围：`agents/openai.yaml` 供 Codex 界面使用，`.claude-plugin/` 让本仓库可以作为 Claude Code 插件安装。
+
+### Claude Code
+
+作为插件安装（在 Claude Code 中输入）：
+
+```text
+/plugin marketplace add Redwinam/full-repo-audit
+/plugin install full-repo-audit@full-repo-audit
+```
+
+插件形式的调用名是 `/full-repo-audit:full-repo-audit`。也可以用安装工具复制到 `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/`，调用名为 `/full-repo-audit`：
+
+```bash
+python3 tools/install_skill.py --agent claude
+```
+
+`--replace`、`--link` 的用法与下文 Codex 相同，加上 `--agent claude` 即可。
+
+### Codex
 
 ```bash
 git clone https://github.com/Redwinam/full-repo-audit.git
@@ -34,9 +55,11 @@ python3 tools/install_skill.py --replace
 python3 tools/install_skill.py --link --replace
 ```
 
-此后当前 checkout 的修改会直接用于 Skill；移动或删除 checkout 会使链接失效。使用 `--codex-home /path/to/codex` 可指定另一个 Codex 配置目录。若界面暂未显示 Skill，可重新打开 Codex。
+此后当前 checkout 的修改会直接用于 Skill；移动或删除 checkout 会使链接失效。使用 `--home /path/to/dir`（旧写法 `--codex-home` 仍可用）可指定另一个配置目录。若界面暂未显示 Skill，可重新打开 Codex。
 
 ## 调用
+
+以下示例使用 Codex 的 `$full-repo-audit` 写法；在 Claude Code 中换成 `/full-repo-audit`（插件安装为 `/full-repo-audit:full-repo-audit`），或直接说“对当前项目做全仓库审查”。
 
 在待审项目的 Codex 任务中输入：
 
@@ -71,13 +94,13 @@ python3 tools/install_skill.py --link --replace
 | `runtime_audit` | `auto` | `off` 仅静态；`auto` 使用现有适合的环境；`on` 将请求的运行时范围纳入必要检查 |
 | `batch_target_units` | `15` | 每批的起始规模，按复杂度调整，不裁剪全库范围 |
 
-自动语言由 Codex 根据明确语言要求、已有审查语言、用户/会话偏好和实际提问语言决定；不会根据项目名、路径或英文源码猜测。已确定语言保存在 `resolved_output_language`，续审时保持一致。已有 `zh-CN` 账本继续兼容；你的中文偏好仍会得到中文报告。只有没有任何语言上下文时才回退英文。
+自动语言由 agent 根据明确语言要求、已有审查语言、用户/会话偏好和实际提问语言决定；不会根据项目名、路径或英文源码猜测。已确定语言保存在 `resolved_output_language`，续审时保持一致。已有 `zh-CN` 账本继续兼容；你的中文偏好仍会得到中文报告。只有没有任何语言上下文时才回退英文。
 
-辅助脚本无法读取会话，Codex 会传入 `--resolved-output-language`；独立手动运行且不传该选项时回退 `en`。
+辅助脚本无法读取会话，agent 会传入 `--resolved-output-language`；独立手动运行且不传该选项时回退 `en`。
 
 生成的代码质量报告内置英文和简体中文标题。其他语言由 agent 按质量协议提供 `quality-labels.json`，无需用户翻译或配置外部服务；正文和固定协议字段继续遵循同一语言策略。
 
-默认状态目录位于仓库外的 `$CODEX_HOME/audits/<repo-name>-<root-path-hash>/<audit-id>/`，未设置 `CODEX_HOME` 时使用 `~/.codex`。也可以明确指定产物目录。
+默认状态目录位于仓库外、当前 agent 的配置目录下：`<agent-home>/audits/<repo-name>-<root-path-hash>/<audit-id>/`。Codex 为 `$CODEX_HOME`（默认 `~/.codex`），Claude Code 为 `$CLAUDE_CONFIG_DIR`（默认 `~/.claude`）。也可以明确指定产物目录。Claude Code 写项目外的文件会请求授权，长时间审查前可用 `/add-dir` 加入该目录。
 
 | 产物 | 用途 |
 |---|---|
@@ -134,7 +157,7 @@ python3 tools/install_skill.py --link --replace
 
 ## 手动检查账本
 
-通常由 Codex 根据 Skill 调用。以下路径需替换为实际项目根目录和仓库外状态目录：
+通常由 agent 根据 Skill 调用。以下路径需替换为实际项目根目录和仓库外状态目录：
 
 ```bash
 python3 skills/full-repo-audit/scripts/audit_state.py init \
@@ -163,7 +186,7 @@ python3 -m venv .venv
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-`PyYAML` 仅用于仓库开发验证，不是已安装 Skill 的运行依赖。测试使用隔离临时目录，不修改真实 Codex 安装或目标项目。CI 在 Linux/macOS 执行相同检查。
+`PyYAML` 仅用于仓库开发验证，不是已安装 Skill 的运行依赖。测试使用隔离临时目录，不修改真实 Codex/Claude 安装或目标项目。CI 在 Linux/macOS 执行相同检查。
 
 改动审查规则时，保持机器协议字段稳定；行为变化应有可观察结果或完成门槛的测试。检查项、账本协议和输出说明需同步。提交前不要包含真实审查报告、凭据、账户数据、本机路径或临时工作文件。
 

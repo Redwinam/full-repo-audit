@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate portable Skill packaging; PyYAML is a development-only dependency."""
 
+import json
 import re
 from pathlib import Path
 import sys
@@ -32,6 +33,12 @@ def main():
         errors.append("UI prompt must explicitly invoke the Skill")
     if not 25 <= len(interface.get("short_description", "")) <= 64:
         errors.append("UI short_description must be 25–64 characters")
+    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    if plugin.get("name") != SKILL.name:
+        errors.append("Claude plugin name must match the Skill")
+    marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+    if [(entry.get("name"), entry.get("source")) for entry in marketplace.get("plugins", [])] != [(SKILL.name, "./")]:
+        errors.append("Claude marketplace must list this repository as its only plugin")
     for path in [*ROOT.glob("README*.md"), *SKILL.rglob("*.md")]:
         text = path.read_text(encoding="utf-8")
         for target in re.findall(r"\]\(([^)]+)\)", text):

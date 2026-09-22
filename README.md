@@ -2,7 +2,7 @@
 
 English · [简体中文](README.zh-CN.md)
 
-**Coverage-driven whole-repository audit for Codex.**
+**Coverage-driven whole-repository audit for Codex and Claude Code.**
 
 Review the current complete project, including old and unchanged code. Build an inventory, inspect each applicable page, route, API, database object, permission policy and background job, persist evidence, resume interrupted batches, and finish with cross-reference checks.
 
@@ -13,6 +13,27 @@ Code quality has a dedicated, complete report: confirmed defects, maintainabilit
 ## Install
 
 Requires Python 3.10+. The installer and audit helper use only the standard library. Playwright, external model APIs and deployment credentials are not required. Installation and automated checks currently cover macOS and Linux.
+
+Both hosts share one `skills/full-repo-audit/`, so the review rules are maintained once. Host differences stay at the edges: `agents/openai.yaml` serves the Codex UI, and `.claude-plugin/` makes this repository installable as a Claude Code plugin.
+
+### Claude Code
+
+Install as a plugin from within Claude Code:
+
+```text
+/plugin marketplace add Redwinam/full-repo-audit
+/plugin install full-repo-audit@full-repo-audit
+```
+
+The plugin invocation is `/full-repo-audit:full-repo-audit`. Alternatively, copy it into `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/`, where it is invoked as `/full-repo-audit`:
+
+```bash
+python3 tools/install_skill.py --agent claude
+```
+
+`--replace` and `--link` work as described for Codex below; add `--agent claude`.
+
+### Codex
 
 ```bash
 git clone https://github.com/Redwinam/full-repo-audit.git
@@ -32,9 +53,11 @@ Backups go to `skill-backups/` outside Skill discovery. The installer prints the
 python3 tools/install_skill.py --link --replace
 ```
 
-A linked installation follows checkout changes and requires the checkout to remain in place. Use `--codex-home /path/to/codex` for another configuration directory. Reopen Codex if its Skill list has not refreshed.
+A linked installation follows checkout changes and requires the checkout to remain in place. Use `--home /path/to/dir` (the older `--codex-home` still works) for another configuration directory. Reopen Codex if its Skill list has not refreshed.
 
 ## Use
+
+Examples use the Codex `$full-repo-audit` form. In Claude Code use `/full-repo-audit` (`/full-repo-audit:full-repo-audit` when installed as a plugin), or simply ask for a whole-repository audit.
 
 In the project to review, ask Codex in your preferred language:
 
@@ -54,11 +77,11 @@ Use $full-repo-audit to resume the audit at the state-dir from the previous repo
 
 ## Language behavior
 
-`output_language=auto` is the default. Codex uses an explicit language request first, preserves a resumed audit's language unless asked to change it, then follows applicable user/session preferences and the user's substantive conversation. Pasted source, paths and the stock English invocation prompt are not language preferences. With no language context, the fallback is English.
+`output_language=auto` is the default. The agent uses an explicit language request first, preserves a resumed audit's language unless asked to change it, then follows applicable user/session preferences and the user's substantive conversation. Pasted source, paths and the stock English invocation prompt are not language preferences. With no language context, the fallback is English.
 
 The resolved language is saved in `config.resolved_output_language`. Set `output_language=zh-CN`, `en`, `ja`, `pt-BR`, etc. to override auto behavior. Existing explicit-language ledgers remain compatible. You do not need to repeat a known language preference in every request.
 
-The standalone Python helper cannot read a conversation. Codex passes its decision through `--resolved-output-language`; a manual CLI call without that hint falls back to `en`. Initial resume scaffolds are English or Simplified Chinese; the agent localizes them to the selected language before delivery.
+The standalone Python helper cannot read a conversation. The agent passes its decision through `--resolved-output-language`; a manual CLI call without that hint falls back to `en`. Initial resume scaffolds are English or Simplified Chinese; the agent localizes them to the selected language before delivery.
 
 Generated quality-report headings support English and Simplified Chinese directly. For other languages the agent supplies `quality-labels.json` as described in the quality protocol; users do not need to translate it or configure an external service. Finding prose and fixed schema keys retain the same language rules.
 
@@ -94,7 +117,7 @@ There is no finding quota or top-N cap. Optional improvements are not silently d
 
 ## Artifacts and handoff
 
-State is stored outside the repository by default, under `$CODEX_HOME/audits/<repo-name>-<root-path-hash>/<audit-id>/` (`~/.codex` when unset), or at an explicit destination.
+State is stored outside the repository by default, under the host agent's home: `<agent-home>/audits/<repo-name>-<root-path-hash>/<audit-id>/`, where `<agent-home>` is `$CODEX_HOME` (`~/.codex` when unset) for Codex and `$CLAUDE_CONFIG_DIR` (`~/.claude` when unset) for Claude Code, or at an explicit destination. Claude Code asks before writing outside the project; use `/add-dir` for that directory before a long audit.
 
 | Artifact | Purpose |
 |---|---|
@@ -123,7 +146,7 @@ These standards were informed by a supplied Grok `Strict Code Quality Review` te
 
 ## Helper CLI
 
-Codex normally runs these commands. Replace the example paths with the actual root and an external state directory:
+The agent normally runs these commands. Replace the example paths with the actual root and an external state directory:
 
 ```bash
 python3 skills/full-repo-audit/scripts/audit_state.py init \
@@ -152,6 +175,6 @@ python3 -m venv .venv
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-PyYAML is a development-only validation dependency. Tests use isolated temporary directories; they do not modify the real Codex installation or project data. CI runs the same checks on Linux and macOS.
+PyYAML is a development-only validation dependency. Tests use isolated temporary directories; they do not modify real Codex or Claude installations or project data. CI runs the same checks on Linux and macOS.
 
 Keep instructions, check names and output contracts consistent. Add behavioral tests for changed completion or installation behavior. Do not commit real audit artifacts, credentials, personal machine paths or temporary work. Validation of this package does not guarantee review quality for every large project or browser environment.

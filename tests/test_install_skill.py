@@ -6,6 +6,7 @@ from unittest import mock
 
 MODULE = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'tools' / 'install_skill.py'))
 install = MODULE['install']
+default_home = MODULE['default_home']
 
 
 class InstallSkillTests(unittest.TestCase):
@@ -100,6 +101,13 @@ class InstallSkillTests(unittest.TestCase):
             install(self.target, self.home, replace=True)
         self.assertEqual((self.target / 'SKILL.md').read_text(), 'original')
 
+
+    def test_default_home_follows_each_agent(self):
+        env = {'CODEX_HOME': '/c', 'CLAUDE_CONFIG_DIR': '/l'}
+        self.assertEqual(default_home('codex', env), Path('/c'))
+        self.assertEqual(default_home('claude', env), Path('/l'))
+        self.assertEqual(default_home('claude', {}), Path.home() / '.claude')
+        self.assertEqual(default_home('codex', {}), Path.home() / '.codex')
 
 if __name__ == '__main__':
     unittest.main()
