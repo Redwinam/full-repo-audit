@@ -14,7 +14,7 @@
 
 需要 Python 3.10+。安装工具和审查账本工具只使用标准库；不要求 Playwright、外部模型 API 或部署凭据。当前安装与自动测试支持 macOS 和 Linux。
 
-两个平台共用同一个 `skills/full-repo-audit/`，审查规则只维护一份。平台差异只在外围：`agents/openai.yaml` 供 Codex 界面使用，`.claude-plugin/` 让本仓库可以作为 Claude Code 插件安装。
+两个平台共用同一个 `skills/full-repo-audit/`，审查规则只维护一份。平台差异只在外围：`.codex-plugin/` 加 `.agents/plugins/`、`.claude-plugin/` 分别让本仓库能在 Codex 和 Claude Code 中作为插件安装，`agents/openai.yaml` 供 Codex 界面使用。
 
 ### Claude Code
 
@@ -34,6 +34,22 @@ python3 tools/install_skill.py --agent claude
 `--replace`、`--link` 的用法与下文 Codex 相同，加上 `--agent claude` 即可。
 
 ### Codex
+
+从 GitHub 以插件方式安装：
+
+```bash
+codex plugin marketplace add Redwinam/full-repo-audit
+codex plugin add full-repo-audit@full-repo-audit
+```
+
+以后升级：先刷新快照，再安装一次：
+
+```bash
+codex plugin marketplace upgrade full-repo-audit
+codex plugin add full-repo-audit@full-repo-audit
+```
+
+也可以用安装工具复制：
 
 ```bash
 git clone https://github.com/Redwinam/full-repo-audit.git

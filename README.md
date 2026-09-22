@@ -14,7 +14,7 @@ Code quality has a dedicated, complete report: confirmed defects, maintainabilit
 
 Requires Python 3.10+. The installer and audit helper use only the standard library. Playwright, external model APIs and deployment credentials are not required. Installation and automated checks currently cover macOS and Linux.
 
-Both hosts share one `skills/full-repo-audit/`, so the review rules are maintained once. Host differences stay at the edges: `agents/openai.yaml` serves the Codex UI, and `.claude-plugin/` makes this repository installable as a Claude Code plugin.
+Both hosts share one `skills/full-repo-audit/`, so the review rules are maintained once. Host differences stay at the edges: `.codex-plugin/` with `.agents/plugins/` and `.claude-plugin/` make this repository installable as a plugin in each host, and `agents/openai.yaml` serves the Codex UI.
 
 ### Claude Code
 
@@ -34,6 +34,22 @@ python3 tools/install_skill.py --agent claude
 `--replace` and `--link` work as described for Codex below; add `--agent claude`.
 
 ### Codex
+
+Install as a plugin from GitHub:
+
+```bash
+codex plugin marketplace add Redwinam/full-repo-audit
+codex plugin add full-repo-audit@full-repo-audit
+```
+
+To upgrade later, refresh the snapshot and install again:
+
+```bash
+codex plugin marketplace upgrade full-repo-audit
+codex plugin add full-repo-audit@full-repo-audit
+```
+
+Alternatively, copy the Skill with the installer:
 
 ```bash
 git clone https://github.com/Redwinam/full-repo-audit.git
