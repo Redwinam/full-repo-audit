@@ -1,0 +1,14 @@
+{
+  "name": "full-repo-audit",
+  "description": "Marketplace for the full-repo-audit Claude Code plugin.",
+  "owner": {
+    "name": "Redwinam"
+  },
+  "plugins": [
+    {
+      "name": "full-repo-audit",
+      "source": "./",
+      "description": "Coverage-driven whole-repository audit with resumable ledgers, cross-reference checks and a complete code-quality catalog."
+    }
+  ]
+}
